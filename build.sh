@@ -426,17 +426,28 @@ EOF
     echo -e "${GREEN}✓ Portage configured with RaptorOS base config + build overrides${NC}"
 }
 
-# Configure repository sync method
+# Configure repository sync method (FIXED)
 configure_repos() {
     echo -e "${CYAN}Configuring repository sync method...${NC}"
     
-    # Create repos.conf directory
-    sudo mkdir -p squashfs/etc/portage/repos.conf
+    # Check if repos.conf exists as a file or directory
+    if [ -f "squashfs/etc/portage/repos.conf" ]; then
+        echo -e "${YELLOW}repos.conf exists as a file, converting to directory...${NC}"
+        # Backup the existing file
+        sudo mv squashfs/etc/portage/repos.conf squashfs/etc/portage/repos.conf.backup
+        # Create directory
+        sudo mkdir -p squashfs/etc/portage/repos.conf
+        # Move backup into directory as gentoo.conf
+        sudo mv squashfs/etc/portage/repos.conf.backup squashfs/etc/portage/repos.conf/gentoo.conf
+    elif [ ! -d "squashfs/etc/portage/repos.conf" ]; then
+        # Create directory if it doesn't exist
+        sudo mkdir -p squashfs/etc/portage/repos.conf
+    fi
     
-    # Copy repos.conf if it exists
+    # Now configure git sync
     if [ -f "$SCRIPT_DIR/configs/repos.conf" ]; then
         sudo cp "$SCRIPT_DIR/configs/repos.conf" squashfs/etc/portage/repos.conf/gentoo.conf
-        echo -e "${GREEN}✓ Git sync configured${NC}"
+        echo -e "${GREEN}✓ Git sync configured from config${NC}"
     else
         # Create repos.conf for git sync
         sudo tee squashfs/etc/portage/repos.conf/gentoo.conf > /dev/null << 'EOF'
@@ -444,7 +455,7 @@ configure_repos() {
 main-repo = gentoo
 
 [gentoo]
-location = /var/db/repos/gentoo
+location = /var/db/repos/portage
 sync-type = git
 sync-uri = https://github.com/gentoo/gentoo.git
 auto-sync = yes
@@ -762,44 +773,70 @@ CHROOTCMD
     create_iso
 }
 
-# Optimized build
+# Optimized build (SAFER VERSION)
 build_optimized() {
     echo -e "${CYAN}Starting optimized build...${NC}"
     
     setup_build_env
     configure_portage
-    configure_repos  # Add this line
+    configure_repos  # Now fixed
     setup_chroot
     
-    # Build critical packages from source
+    # Build critical packages from source WITH SAFE SETTINGS
     sudo chroot squashfs /bin/bash << 'CHROOTCMD'
 #!/bin/bash
 source /etc/profile
 
-# Sync portage using git (more reliable than rsync)
-emerge --sync --quiet
+# First ensure git is installed for sync
+if ! command -v git &> /dev/null; then
+    echo "Installing git first..."
+    emerge-webrsync  # Get initial tree
+    emerge --oneshot dev-vcs/git
+fi
 
-# Update system
-emerge --quiet --update --deep --newuse @world
+# Sync portage using git
+echo "Syncing portage tree..."
+emerge --sync || emerge-webrsync  # Fallback to webrsync if git fails
 
-# Build kernel from source
+# Update system with safe settings
+echo "Updating base system..."
+emerge --update --deep --newuse @world --keep-going
+
+# Build kernel from source with SAFE job count
+echo "Building kernel..."
 emerge -av sys-kernel/gentoo-sources
-cd /usr/src/linux
-make defconfig
-make -j48
-make modules_install
-make install
 
-# Build rest with mix of binary and source
-emerge -av \
+if [ -d /usr/src/linux ]; then
+    cd /usr/src/linux
+    make defconfig
+    # Use safe job count, not 48!
+    make -j8
+    make modules_install
+    make install
+fi
+
+# Install essential packages
+echo "Installing essential packages..."
+emerge -av --keep-going \
     sys-kernel/linux-firmware \
     sys-boot/grub \
-    sys-apps/systemd \
-    x11-drivers/nvidia-drivers \
+    sys-boot/efibootmgr \
+    sys-apps/systemd
+
+# Try to get NVIDIA drivers (might need to be from binary)
+echo "Installing GPU drivers..."
+emerge -av x11-drivers/nvidia-drivers || \
+    emerge --getbinpkg -av x11-drivers/nvidia-drivers
+
+# Gaming packages (use binaries where possible for speed)
+echo "Installing gaming packages..."
+emerge --getbinpkg -av --keep-going \
     games-util/steam-launcher \
     games-util/lutris \
     games-util/gamemode \
-    app-emulation/wine-staging
+    app-emulation/wine-staging || echo "Some gaming packages failed, continuing..."
+
+echo "Build completed!"
 CHROOTCMD
     
     cleanup_chroot
@@ -811,38 +848,51 @@ CHROOTCMD
     create_iso
 }
 
-# Full build from source
+# Full build from source (SAFER VERSION)
 build_full() {
     echo -e "${CYAN}Starting full build (everything from source)...${NC}"
     echo -e "${YELLOW}This will take 6-8 hours!${NC}"
     
     setup_build_env
     configure_portage
-    configure_repos  # Add this line
+    configure_repos  # Now fixed
     setup_chroot
     
-    # Build everything from source
+    # Build everything from source WITH SAFE SETTINGS
     sudo chroot squashfs /bin/bash << 'CHROOTCMD'
 #!/bin/bash
 source /etc/profile
 
-# Sync portage using git (more reliable than rsync)
-emerge --sync
+# First ensure git is installed for sync
+if ! command -v git &> /dev/null; then
+    echo "Installing git first..."
+    emerge-webrsync  # Get initial tree
+    emerge --oneshot dev-vcs/git
+fi
 
-# Full system update
-emerge --emptytree --update --deep --newuse @world
+# Sync portage using git
+echo "Syncing portage tree..."
+emerge --sync || emerge-webrsync  # Fallback to webrsync if git fails
 
-# Install all packages
-emerge -av \
+# Full system update with safe settings
+echo "Updating base system..."
+emerge --emptytree --update --deep --newuse @world --keep-going
+
+# Install all packages with safe settings
+echo "Installing packages..."
+emerge -av --keep-going \
     sys-kernel/gentoo-sources \
     sys-kernel/linux-firmware \
     sys-boot/grub \
+    sys-boot/efibootmgr \
     x11-drivers/nvidia-drivers \
     kde-plasma/plasma-meta \
     games-util/steam-launcher \
     games-util/lutris \
     games-util/gamemode \
-    app-emulation/wine-staging
+    app-emulation/wine-staging || echo "Some packages failed, continuing..."
+
+echo "Full build completed!"
 CHROOTCMD
     
     cleanup_chroot
