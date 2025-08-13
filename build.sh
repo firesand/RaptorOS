@@ -170,7 +170,7 @@ setup_build_env() {
         echo -e "${CYAN}Downloading stage3...${NC}"
         
         # Get the latest stage3 file from the selected URL
-        local stage3_file=$(wget -qO- "$STAGE3_URL" | grep -o "stage3-.*\.tar\.xz" | grep -v "\.asc\|\.CONTENTS\|\.DIGESTS\|\.sha256" | head -1)
+        local stage3_file=$(wget -qO- "$STAGE3_URL" | grep -o "stage3-[^\"<>]*\.tar\.xz" | grep -v "\.asc\|\.CONTENTS\|\.DIGESTS\|\.sha256" | head -1)
         
         if [ -z "$stage3_file" ]; then
             echo -e "${RED}Error: Could not determine latest stage3 version${NC}"
