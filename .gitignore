@@ -1,0 +1,143 @@
+# RaptorOS Git Ignore File
+
+# Build artifacts
+*.iso
+*.img
+*.tar.gz
+*.tar.xz
+*.zip
+build/
+squashfs/
+backup*/
+emergency-backup*/
+*.tmp
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+logs/
+install-*.log
+
+# Cache directories
+.cache/
+*.cache
+
+# User-specific files
+*.user
+*.local
+.local/
+
+# Package manager files
+*.lock
+*.lockfile
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# System files
+.fuse_hidden*
+.nfs*
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Testing
+test_*/
+*.test
+coverage/
+
+# Documentation builds
+docs/_build/
+docs/build/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Compiled files
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Archives
+*.7z
+*.dmg
+*.gz
+*.iso
+*.rar
+*.tar
+*.zip
+
+# Database
+*.db
+*.sqlite
+
+# Configuration files that might contain sensitive data
+config.local
+.env
+.env.local
+.env.production
+
+# Kernel modules
+*.ko
+
+# Firmware files
+*.bin
+*.fw
+
+# Wine prefixes (can be large)
+.wine/
+.wine*/
+wineprefixes/
+
+# Game installations
+Games/
+SteamLibrary/
+Program Files/
+
+# User data
+Downloads/
+Pictures/
+Music/
+Videos/
+Documents/
+
+# System directories
+proc/
+sys/
+dev/
+run/
+mnt/
+
+# Keep important configs but ignore user modifications
+!configs/
+!scripts/
+!installer/
+!docs/

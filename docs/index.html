@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RaptorOS - Performance Evolved | Gaming Linux Distribution</title>
+    <meta name="description" content="RaptorOS is a Gentoo-based Linux distribution optimized for extreme gaming performance. Unleash your hardware's true potential.">
+    <meta property="og:title" content="RaptorOS - Performance Evolved">
+    <meta property="og:description" content="The ultimate gaming Linux distribution. Hardware-optimized, blazing fast, ready to game.">
+    <meta property="og:image" content="https://raptoros.org/assets/og-image.png">
+    <meta property="og:url" content="https://raptoros.org">
+    <meta name="twitter:card" content="summary_large_image">
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --raptor-green: #76B900;
+            --raptor-green-dark: #5A8C00;
+            --raptor-green-light: #8FD918;
+            --performance-purple: #BB9AF7;
+            --speed-blue: #7AA2F7;
+            --power-orange: #FF6C3E;
+            --bg-primary: #1A1B26;
+            --bg-secondary: #24283B;
+            --bg-tertiary: #2F3549;
+            --text-primary: #C0CAF5;
+            --text-secondary: #A9B1D6;
+            --text-muted: #565F89;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow-x: hidden;
+        }
+        
+        /* Animated Background */
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+        }
+        
+        .bg-animation::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, var(--raptor-green) 0%, transparent 5%),
+                        radial-gradient(circle, var(--performance-purple) 0%, transparent 5%);
+            opacity: 0.1;
+            animation: drift 20s infinite linear;
+        }
+        
+        @keyframes drift {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Header */
+        header {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            padding: 1rem 2rem;
+            background: rgba(26, 27, 38, 0.95);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            border-bottom: 2px solid var(--raptor-green);
+        }
+        
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .logo {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 900;
+            color: var(--raptor-green);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+        
+        .nav-links a {
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        
+        .nav-links a:hover {
+            color: var(--raptor-green);
+        }
+        
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 2rem;
+            margin-top: 4rem;
+        }
+        
+        .ascii-logo {
+            font-family: monospace;
+            color: var(--raptor-green);
+            font-size: 0.9rem;
+            line-height: 1.2;
+            margin-bottom: 2rem;
+            white-space: pre;
+        }
+        
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 4rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, var(--raptor-green), var(--performance-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+        
+        .tagline {
+            font-size: 1.5rem;
+            color: var(--text-secondary);
+            margin-bottom: 3rem;
+        }
+        
+        .cta-buttons {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .btn {
+            padding: 1rem 2rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, var(--raptor-green), var(--raptor-green-dark));
+            color: var(--bg-primary);
+            border: 2px solid transparent;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(118, 185, 0, 0.3);
+        }
+        
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 2px solid var(--performance-purple);
+        }
+        
+        .btn-secondary:hover {
+            background: var(--performance-purple);
+            color: var(--bg-primary);
+        }
+        
+        /* Stats Section */
+        .stats {
+            padding: 4rem 2rem;
+            background: var(--bg-secondary);
+        }
+        
+        .stats-grid {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+        }
+        
+        .stat-card {
+            background: var(--bg-tertiary);
+            padding: 2rem;
+            border-radius: 12px;
+            border: 1px solid var(--raptor-green);
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 3rem;
+            font-weight: 900;
+            color: var(--raptor-green);
+        }
+        
+        .stat-label {
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+        
+        /* Features Section */
+        .features {
+            padding: 4rem 2rem;
+        }
+        
+        .features-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h2 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2.5rem;
+            text-align: center;
+            margin-bottom: 3rem;
+            color: var(--performance-purple);
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+        }
+        
+        .feature-card {
+            background: var(--bg-secondary);
+            padding: 2rem;
+            border-radius: 12px;
+            border: 1px solid var(--speed-blue);
+            transition: transform 0.3s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--raptor-green);
+        }
+        
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+        
+        .feature-title {
+            font-size: 1.3rem;
+            color: var(--speed-blue);
+            margin-bottom: 1rem;
+        }
+        
+        .feature-description {
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        
+        /* Benchmark Section */
+        .benchmarks {
+            padding: 4rem 2rem;
+            background: var(--bg-secondary);
+        }
+        
+        .benchmark-chart {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .benchmark-item {
+            margin-bottom: 2rem;
+        }
+        
+        .benchmark-title {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+        
+        .benchmark-bar {
+            height: 30px;
+            background: var(--bg-tertiary);
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .benchmark-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--raptor-green), var(--raptor-green-light));
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 1rem;
+            color: var(--bg-primary);
+            font-weight: 700;
+            animation: fillBar 2s ease-out;
+        }
+        
+        @keyframes fillBar {
+            from { width: 0; }
+        }
+        
+        /* Footer */
+        footer {
+            padding: 3rem 2rem;
+            background: var(--bg-tertiary);
+            text-align: center;
+            border-top: 2px solid var(--raptor-green);
+        }
+        
+        .social-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .social-links a {
+            color: var(--text-secondary);
+            font-size: 1.5rem;
+            transition: color 0.3s;
+        }
+        
+        .social-links a:hover {
+            color: var(--raptor-green);
+        }
+        
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.5rem;
+            }
+            
+            .tagline {
+                font-size: 1.2rem;
+            }
+            
+            .nav-links {
+                display: none;
+            }
+            
+            .ascii-logo {
+                font-size: 0.6rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-animation"></div>
+    
+    <header>
+        <nav>
+            <a href="#" class="logo">
+                🦖 RaptorOS
+            </a>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#benchmarks">Benchmarks</a></li>
+                <li><a href="#download">Download</a></li>
+                <li><a href="https://github.com/yourusername/raptoros">GitHub</a></li>
+                <li><a href="https://discord.gg/raptoros">Discord</a></li>
+            </ul>
+        </nav>
+    </header>
+    
+    <section class="hero">
+        <pre class="ascii-logo">
+╦═╗┌─┐┌─┐┌┬┐┌─┐┬─┐╔═╗╔═╗
+╠╦╝├─┤├─┘ │ │ │├┬┘║ ║╚═╗
+╩╚═┴ ┴┴   ┴ └─┘┴└─╚═╝╚═╝</pre>
+        <h1>RaptorOS</h1>
+        <p class="tagline">Performance Evolved™</p>
+        <p style="color: var(--text-secondary); margin-bottom: 2rem; max-width: 600px;">
+            The ultimate gaming Linux distribution. Hardware-optimized compilation, bleeding-edge drivers, 
+            and intelligent system tuning deliver uncompromised performance for enthusiast gamers.
+        </p>
+        <div class="cta-buttons">
+            <a href="#download" class="btn btn-primary">
+                ⬇ Download v1.0.0
+            </a>
+            <a href="https://github.com/yourusername/raptoros" class="btn btn-secondary">
+                📖 Documentation
+            </a>
+        </div>
+    </section>
+    
+    <section class="stats">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number">580</div>
+                <div class="stat-label">FPS in CS2 (1440p)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">7.4%</div>
+                <div class="stat-label">Faster than Windows</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">30min</div>
+                <div class="stat-label">Installation Time</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">100%</div>
+                <div class="stat-label">Open Source</div>
+            </div>
+        </div>
+    </section>
+    
+    <section class="features" id="features">
+        <div class="features-container">
+            <h2>Evolved Features</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🎮</div>
+                    <div class="feature-title">Gaming Ready</div>
+                    <div class="feature-description">
+                        Steam, Lutris, and Heroic pre-installed. GameMode and MangoHud configured. 
+                        Latest Proton with all gaming patches enabled.
+                    </div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <div class="feature-title">Hardware Optimized</div>
+                    <div class="feature-description">
+                        Every package compiled for YOUR specific CPU. Intel Thread Director aware. 
+                        P-core/E-core optimization for hybrid CPUs.
+                    </div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎨</div>
+                    <div class="feature-title">Beautiful Desktop</div>
+                    <div class="feature-description">
+                        Hyprland with gaming rice. Tearing support for maximum FPS. 
+                        Tokyo Night themed with blur and animations.
+                    </div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🚀</div>
+                    <div class="feature-title">Bleeding Edge</div>
+                    <div class="feature-description">
+                        Latest kernel with CachyOS patches. NVIDIA 545+ drivers. 
+                        Mesa-git for AMD users. Day-one game support.
+                    </div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🛡️</div>
+                    <div class="feature-title">Intelligent Installer</div>
+                    <div class="feature-description">
+                        Hardware auto-detection. Safe disk selection. 
+                        Visual TUI that makes Gentoo installation effortless.
+                    </div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔧</div>
+                    <div class="feature-title">Power User Tools</div>
+                    <div class="feature-description">
+                        CoreCtrl for GPU control. btop for monitoring. 
+                        Full Portage power with simplified wrappers.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <section class="benchmarks" id="benchmarks">
+        <div class="features-container">
+            <h2>Performance Benchmarks</h2>
+            <p style="text-align: center; color: var(--text-secondary); margin-bottom: 3rem;">
+                RTX 4090 + i9-14900K | 4K Ultra Settings
+            </p>
+            <div class="benchmark-chart">
+                <div class="benchmark-item">
+                    <div class="benchmark-title">
+                        <span>Cyberpunk 2077 (RT Ultra)</span>
+                        <span style="color: var(--raptor-green);">+4%</span>
+                    </div>
+                    <div class="benchmark-bar">
+                        <div class="benchmark-fill" style="width: 95%;">78 FPS</div>
+                    </div>
+                </div>
+                <div class="benchmark-item">
+                    <div class="benchmark-title">
+                        <span>Counter-Strike 2</span>
+                        <span style="color: var(--raptor-green);">+7.4%</span>
+                    </div>
+                    <div class="benchmark-bar">
+                        <div class="benchmark-fill" style="width: 100%;">580 FPS</div>
+                    </div>
+                </div>
+                <div class="benchmark-item">
+                    <div class="benchmark-title">
+                        <span>Baldur's Gate 3</span>
+                        <span style="color: var(--raptor-green);">+3.3%</span>
+                    </div>
+                    <div class="benchmark-bar">
+                        <div class="benchmark-fill" style="width: 92%;">95 FPS</div>
+                    </div>
+                </div>
+                <div class="benchmark-item">
+                    <div class="benchmark-title">
+                        <span>Elden Ring</span>
+                        <span style="color: var(--text-secondary);">Equal*</span>
+                    </div>
+                    <div class="benchmark-bar">
+                        <div class="benchmark-fill" style="width: 85%;">60 FPS</div>
+                    </div>
+                </div>
+            </div>
+            <p style="text-align: center; color: var(--text-muted); margin-top: 2rem;">
+                * Better 1% lows and frame times on RaptorOS
+            </p>
+        </div>
+    </section>
+    
+    <section class="hero" id="download" style="min-height: auto; padding: 4rem 2rem;">
+        <h2>Ready to Evolve?</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 2rem;">
+            Join the pack. Unleash your hardware's true potential.
+        </p>
+        <div class="cta-buttons">
+            <a href="https://github.com/yourusername/raptoros/releases" class="btn btn-primary">
+                ⬇ Download RaptorOS
+            </a>
+            <a href="https://discord.gg/raptoros" class="btn btn-secondary">
+                💬 Join Discord
+            </a>
+        </div>
+    </section>
+    
+    <footer>
+        <div class="social-links">
+            <a href="https://github.com/yourusername/raptoros">GitHub</a>
+            <a href="https://discord.gg/raptoros">Discord</a>
+            <a href="https://twitter.com/RaptorOS">Twitter</a>
+            <a href="https://www.reddit.com/r/RaptorOS">Reddit</a>
+        </div>
+        <p style="color: var(--text-muted);">
+            © 2024 RaptorOS Project | Based on Gentoo Linux | GPL-3.0 License
+        </p>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 1rem;">
+            Performance Evolved™ is a trademark of the RaptorOS Project
+        </p>
+    </footer>
+    
+    <script>
+        // Smooth scrolling
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({
+                    behavior: 'smooth'
+                });
+            });
+        });
+        
+        // Animate stats on scroll
+        const observerOptions = {
+            threshold: 0.5
+        };
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.animation = 'none';
+                    setTimeout(() => {
+                        entry.target.style.animation = 'fillBar 2s ease-out';
+                    }, 10);
+                }
+            });
+        }, observerOptions);
+        
+        document.querySelectorAll('.benchmark-fill').forEach(el => {
+            observer.observe(el);
+        });
+    </script>
+</body>
+</html>

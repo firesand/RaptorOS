@@ -1,0 +1,13 @@
+# Modern stable version optimizations
+
+# LLVM 20 with Mesa 25
+media-libs/mesa llvm20-mesa25
+
+# GCC 14.3 specific
+sys-devel/gcc gcc14-latest
+
+# NVIDIA 570+ specific
+>=x11-drivers/nvidia-drivers-570 nvidia-modern
+
+# systemd 257
+sys-apps/systemd systemd-modern

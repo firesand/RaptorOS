@@ -1,0 +1,2279 @@
+#!/bin/bash
+# RaptorOS Welcome Application
+# First-boot setup and system optimization wizard
+
+# Source UI helper
+source /usr/local/lib/raptoros/ui_helper.sh 2>/dev/null || true
+
+# Welcome screen
+show_welcome_screen() {
+    dialog --colors --backtitle "Welcome to RaptorOS" \
+           --title "\Zb\Z2Welcome to RaptorOS!\Zn" \
+           --msgbox "\n\
+     ╦═╗┌─┐┌─┐┌┬┐┌─┐┬─┐╔═╗╔═╗\n\
+     ╠╦╝├─┤├─┘ │ │ │├┬┘║ ║╚═╗\n\
+     ╩╚═┴ ┴┴   ┴ └─┘┴└─╚═╝╚═╝\n\
+       Performance Evolved™\n\n\
+Welcome, \Z4${USER}\Zn!\n\n\
+This wizard will help you:\n\
+  • Install essential gaming software\n\
+  • Optimize system performance\n\
+  • Configure gaming peripherals\n\
+  • Set up game libraries\n\
+  • Enable performance monitoring\n\n\
+Let's unleash your hardware's true potential!" 24 65
+}
+
+# Enhanced System Status - Graphical version of validate-performance.sh
+show_system_status() {
+    local status_report=""
+    local optimization_score=0
+    local max_score=100
+    
+    # Check CPU governor
+    local cpu_gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
+    if [[ "$cpu_gov" == "performance" ]]; then
+        status_report+="✓ CPU Governor: Performance mode\n"
+        optimization_score=$((optimization_score + 20))
+    else
+        status_report+="✗ CPU Governor: $cpu_gov (not optimized)\n"
+    fi
+    
+    # Check GPU driver
+    if lsmod | grep -q nvidia; then
+        status_report+="✓ NVIDIA Driver: Loaded\n"
+        optimization_score=$((optimization_score + 20))
+    elif lsmod | grep -q amdgpu; then
+        status_report+="✓ AMD GPU Driver: Loaded\n"
+        optimization_score=$((optimization_score + 20))
+    else
+        status_report+="✗ GPU Driver: Not detected\n"
+    fi
+    
+    # Check GameMode
+    if command -v gamemoded &>/dev/null; then
+        status_report+="✓ GameMode: Installed\n"
+        optimization_score=$((optimization_score + 15))
+    else
+        status_report+="✗ GameMode: Not installed\n"
+    fi
+    
+    # Check Mangohud
+    if command -v mangohud &>/dev/null; then
+        status_report+="✓ MangoHud: Installed\n"
+        optimization_score=$((optimization_score + 15))
+    else
+        status_report+="✗ MangoHud: Not installed\n"
+    fi
+    
+    # Check Steam
+    if command -v steam &>/dev/null; then
+        status_report+="✓ Steam: Installed\n"
+        optimization_score=$((optimization_score + 15))
+    else
+        status_report+="✗ Steam: Not installed\n"
+    fi
+    
+    # Check ZRAM
+    if lsmod | grep -q zram; then
+        status_report+="✓ ZRAM: Enabled\n"
+        optimization_score=$((optimization_score + 15))
+    else
+        status_report+="✗ ZRAM: Not configured\n"
+    fi
+    
+    # Enhanced status with more details
+    local enhanced_report=""
+    enhanced_report+="System Status Report:\n"
+    enhanced_report+="═══════════════════════════\n\n"
+    enhanced_report+="$status_report\n"
+    enhanced_report+="Optimization Score: \Z2${optimization_score}/100\Zn\n\n"
+    enhanced_report+="$(get_optimization_rating $optimization_score)\n\n"
+    
+    # Add performance validation results
+    if [ -f /usr/local/bin/validate-performance ]; then
+        enhanced_report+="📊 Performance Validation:\n"
+        enhanced_report+="Run 'validate-performance' for detailed analysis\n\n"
+    fi
+    
+    # Add system validator results
+    if [ -f /usr/local/bin/system-validator ]; then
+        enhanced_report+="🔍 System Health Check:\n"
+        enhanced_report+="Run 'system-validator' for comprehensive check\n\n"
+    fi
+    
+    # Show enhanced status dialog
+    dialog --colors --backtitle "RaptorOS Welcome" \
+           --title "System Status Dashboard" \
+           --msgbox "$enhanced_report" 25 70
+    
+    # Offer to run detailed validation
+    dialog --yesno "Would you like to run a detailed system validation now?" 8 50
+    if [ $? -eq 0 ]; then
+        if [ -f /usr/local/bin/system-validator ]; then
+            clear
+            echo "Running system validation..."
+            system-validator
+            read -p "Press Enter to continue..."
+        else
+            dialog --msgbox "System validator not found. Install it first." 8 50
+        fi
+    fi
+    
+    echo $optimization_score
+}
+
+# Legacy function for compatibility
+check_system_status() {
+    show_system_status
+}
+
+# Get optimization rating
+get_optimization_rating() {
+    local score=$1
+    
+    if [ $score -ge 90 ]; then
+        echo "🦖 APEX PREDATOR - Your system is fully optimized!"
+    elif [ $score -ge 70 ]; then
+        echo "🦅 HUNTING RAPTOR - Good performance, minor tweaks needed"
+    elif [ $score -ge 50 ]; then
+        echo "🦎 YOUNG HUNTER - Several optimizations available"
+    else
+        echo "🥚 HATCHLING - Many optimizations needed"
+    fi
+}
+
+# Enhanced Software Center - Clean TUI for common gaming apps
+software_center() {
+    while true; do
+        local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                             --title "🛍️  Software Center" \
+                             --menu "\nSelect software category:" \
+                             20 65 8 \
+                             "1" "🎮 Gaming Platforms" \
+                             "2" "🛠️  Gaming Tools" \
+                             "3" "💬 Communication" \
+                             "4" "📹 Streaming & Recording" \
+                             "5" "🎨 Retro Gaming" \
+                             "6" "🔧 System Tools" \
+                             "7" "📦 Flatpak Apps" \
+                             "8" "Back to Main Menu" \
+                             3>&1 1>&2 2>&3)
+        
+        case $choice in
+            1) install_gaming_platforms ;;
+            2) install_gaming_tools ;;
+            3) install_communication_apps ;;
+            4) install_streaming_apps ;;
+            5) install_retro_gaming ;;
+            6) install_system_tools ;;
+            7) install_flatpak_apps ;;
+            8|"") break ;;
+        esac
+    done
+}
+
+# Gaming Platforms
+install_gaming_platforms() {
+    local software=$(dialog --backtitle "RaptorOS Welcome" \
+                           --title "🎮 Gaming Platforms" \
+                           --checklist "\nSelect gaming platforms to install:" \
+                           20 70 8 \
+                           "steam" "Steam - Valve's gaming platform" OFF \
+                           "lutris" "Lutris - Universal game launcher" OFF \
+                           "heroic" "Heroic - Epic/GOG launcher" OFF \
+                           "bottles" "Bottles - Windows software manager" OFF \
+                           "minecraft" "Minecraft Launcher" OFF \
+                           "itch" "itch.io - Indie games" OFF \
+                           "retroarch" "RetroArch - Retro gaming" OFF \
+                           "citra" "Citra - 3DS emulator" OFF \
+                           3>&1 1>&2 2>&3)
+    
+    if [ $? -eq 0 ] && [ ! -z "$software" ]; then
+        install_selected_software "$software" "Gaming Platforms"
+    fi
+}
+
+# Gaming Tools
+install_gaming_tools() {
+    local software=$(dialog --backtitle "RaptorOS Welcome" \
+                           --title "🛠️  Gaming Tools" \
+                           --checklist "\nSelect gaming tools to install:" \
+                           20 70 8 \
+                           "gamemode" "GameMode - Gaming optimizer" OFF \
+                           "mangohud" "MangoHud - Performance overlay" OFF \
+                           "goverlay" "GOverlay - MangoHud GUI" OFF \
+                           "corectrl" "CoreCtrl - GPU control" OFF \
+                           "radeon-profile" "Radeon Profile - AMD GPU" OFF \
+                           "nvidia-settings" "NVIDIA Settings" OFF \
+                           "gamemode-daemon" "GameMode Daemon" OFF \
+                           "gamemode-ui" "GameMode UI" OFF \
+                           3>&1 1>&2 2>&3)
+    
+    if [ $? -eq 0 ] && [ ! -z "$software" ]; then
+        install_selected_software "$software" "Gaming Tools"
+    fi
+}
+
+# Communication Apps
+install_communication_apps() {
+    local software=$(dialog --backtitle "RaptorOS Welcome" \
+                           --title "💬 Communication" \
+                           --checklist "\nSelect communication apps:" \
+                           20 70 6 \
+                           "discord" "Discord - Gaming communication" OFF \
+                           "teamspeak" "TeamSpeak - Voice chat" OFF \
+                           "mumble" "Mumble - Low-latency voice" OFF \
+                           "element" "Element - Matrix chat" OFF \
+                           "telegram" "Telegram - Messaging" OFF \
+                           "signal" "Signal - Secure messaging" OFF \
+                           3>&1 1>&2 2>&3)
+    
+    if [ $? -eq 0 ] && [ ! -z "$software" ]; then
+        install_selected_software "$software" "Communication Apps"
+    fi
+}
+
+# Streaming & Recording
+install_streaming_apps() {
+    local software=$(dialog --backtitle "RaptorOS Welcome" \
+                           --title "📹 Streaming & Recording" \
+                           --checklist "\nSelect streaming apps:" \
+                           20 70 8 \
+                           "obs" "OBS Studio - Streaming/recording" OFF \
+                           "streamlabs" "Streamlabs OBS" OFF \
+                           "kdenlive" "Kdenlive - Video editing" OFF \
+                           "ffmpeg" "FFmpeg - Media tools" OFF \
+                           "gstreamer" "GStreamer - Multimedia" OFF \
+                           "v4l2loopback" "Virtual camera" OFF \
+                           "pavucontrol" "PulseAudio control" OFF \
+                           "pavucontrol-qt" "PulseAudio control (Qt)" OFF \
+                           3>&1 1>&2 2>&3)
+    
+    if [ $? -eq 0 ] && [ ! -z "$software" ]; then
+        install_selected_software "$software" "Streaming Apps"
+    fi
+}
+
+# Retro Gaming
+install_retro_gaming() {
+    local software=$(dialog --backtitle "RaptorOS Welcome" \
+                           --title "🎨 Retro Gaming" \
+                           --checklist "\nSelect retro gaming tools:" \
+                           20 70 8 \
+                           "retroarch" "RetroArch - All-in-one emulator" OFF \
+                           "dolphin" "Dolphin - GameCube/Wii" OFF \
+                           "ppsspp" "PPSSPP - PSP emulator" OFF \
+                           "citra" "Citra - 3DS emulator" OFF \
+                           "yuzu" "Yuzu - Switch emulator" OFF \
+                           "rpcs3" "RPCS3 - PS3 emulator" OFF \
+                           "cemu" "Cemu - Wii U emulator" OFF \
+                           "mame" "MAME - Arcade emulator" OFF \
+                           3>&1 1>&2 2>&3)
+    
+    if [ $? -eq 0 ] && [ ! -z "$software" ]; then
+        install_selected_software "$software" "Retro Gaming"
+    fi
+}
+
+# System Tools
+install_system_tools() {
+    local software=$(dialog --backtitle "RaptorOS Welcome" \
+                           --title "🔧 System Tools" \
+                           --checklist "\nSelect system tools:" \
+                           20 70 8 \
+                           "htop" "htop - Process viewer" OFF \
+                           "iotop" "iotop - I/O monitoring" OFF \
+                           "nethogs" "nethogs - Network monitoring" OFF \
+                           "glances" "Glances - System monitoring" OFF \
+                           "btop" "btop - Resource monitor" OFF \
+                           "bashtop" "bashtop - System monitor" OFF \
+                           "neofetch" "neofetch - System info" OFF \
+                           "screenfetch" "screenfetch - System info" OFF \
+                           3>&1 1>&2 2>&3)
+    
+    if [ $? -eq 0 ] && [ ! -z "$software" ]; then
+        install_selected_software "$software" "System Tools"
+    fi
+}
+
+# Flatpak Apps
+install_flatpak_apps() {
+    local software=$(dialog --backtitle "RaptorOS Welcome" \
+                           --title "📦 Flatpak Apps" \
+                           --checklist "\nSelect Flatpak applications:" \
+                           20 70 8 \
+                           "spotify" "Spotify - Music streaming" OFF \
+                           "telegram" "Telegram - Messaging" OFF \
+                           "firefox" "Firefox - Web browser" OFF \
+                           "chrome" "Google Chrome" OFF \
+                           "vscode" "Visual Studio Code" OFF \
+                           "blender" "Blender - 3D modeling" OFF \
+                           "gimp" "GIMP - Image editing" OFF \
+                           "inkscape" "Inkscape - Vector graphics" OFF \
+                           3>&1 1>&2 2>&3)
+    
+    if [ $? -eq 0 ] && [ ! -z "$software" ]; then
+        install_flatpak_software "$software" "Flatpak Apps"
+    fi
+}
+
+# Install selected software with progress bar
+install_selected_software() {
+    local software_list="$1"
+    local category="$2"
+    
+    (
+        local count=0
+        local total=$(echo "$software_list" | wc -w)
+        
+        for app in $software_list; do
+            app=$(echo $app | tr -d '"')
+            count=$((count + 1))
+            local progress=$((count * 100 / total))
+            
+            echo "$progress"
+            echo "# Installing $app... ($count/$total)"
+            
+            case $app in
+                steam) emerge -q games-util/steam-launcher ;;
+                lutris) emerge -q games-util/lutris ;;
+                heroic) flatpak install -y flathub com.heroicgameslauncher.hgl ;;
+                bottles) flatpak install -y flathub com.usebottles.bottles ;;
+                minecraft) flatpak install -y flathub com.mojang.Minecraft ;;
+                itch) emerge -q games-util/itch ;;
+                retroarch) emerge -q games-emulation/retroarch ;;
+                citra) emerge -q games-emulation/citra ;;
+                gamemode) emerge -q games-util/gamemode ;;
+                mangohud) emerge -q games-util/mangohud ;;
+                goverlay) emerge -q games-util/goverlay ;;
+                corectrl) emerge -q sys-apps/corectrl ;;
+                radeon-profile) emerge -q sys-apps/radeon-profile ;;
+                nvidia-settings) emerge -q x11-drivers/nvidia-drivers ;;
+                gamemode-daemon) emerge -q sys-apps/gamemode ;;
+                gamemode-ui) emerge -q games-util/gamemode-ui ;;
+                discord) flatpak install -y flathub com.discordapp.Discord ;;
+                teamspeak) emerge -q net-im/teamspeak-client ;;
+                mumble) emerge -q net-im/mumble ;;
+                element) flatpak install -y flathub im.riot.Riot ;;
+                telegram) emerge -q net-im/telegram-desktop ;;
+                signal) emerge -q net-im/signal-desktop ;;
+                obs) flatpak install -y flathub com.obsproject.Studio ;;
+                streamlabs) flatpak install -y flathub com.streamlabs.Streamlabs ;;
+                kdenlive) emerge -q kde-apps/kdenlive ;;
+                ffmpeg) emerge -q media-video/ffmpeg ;;
+                gstreamer) emerge -q media-libs/gstreamer ;;
+                v4l2loopback) emerge -q media-video/v4l2loopback ;;
+                pavucontrol) emerge -q media-sound/pavucontrol ;;
+                pavucontrol-qt) emerge -q media-sound/pavucontrol-qt ;;
+                dolphin) emerge -q games-emulation/dolphin ;;
+                ppsspp) emerge -q games-emulation/ppsspp ;;
+                yuzu) emerge -q games-emulation/yuzu ;;
+                rpcs3) emerge -q games-emulation/rpcs3 ;;
+                cemu) emerge -q games-emulation/cemu ;;
+                mame) emerge -q games-emulation/mame ;;
+                htop) emerge -q sys-process/htop ;;
+                iotop) emerge -q sys-process/iotop ;;
+                nethogs) emerge -q net-analyzer/nethogs ;;
+                glances) emerge -q sys-process/glances ;;
+                btop) emerge -q sys-process/btop ;;
+                bashtop) emerge -q sys-process/bashtop ;;
+                neofetch) emerge -q app-misc/neofetch ;;
+                screenfetch) emerge -q app-misc/screenfetch ;;
+                spotify) flatpak install -y flathub com.spotify.Client ;;
+                firefox) flatpak install -y flathub org.mozilla.firefox ;;
+                chrome) flatpak install -y flathub com.google.Chrome ;;
+                vscode) flatpak install -y flathub com.visualstudio.code ;;
+                blender) flatpak install -y flathub org.blender.Blender ;;
+                gimp) flatpak install -y flathub org.gimp.GIMP ;;
+                inkscape) flatpak install -y flathub org.inkscape.Inkscape ;;
+            esac
+        done
+    ) | dialog --backtitle "RaptorOS Welcome" \
+               --title "Installing $category" \
+               --gauge "Starting installation..." 10 70 0
+    
+    dialog --msgbox "$category installation complete!" 8 50
+}
+
+# Install Flatpak software
+install_flatpak_software() {
+    local software_list="$1"
+    local category="$2"
+    
+    # Ensure Flatpak is installed
+    if ! command -v flatpak &>/dev/null; then
+        dialog --msgbox "Flatpak not installed. Installing now..." 8 50
+        emerge -q app-containers/flatpak
+        flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+    fi
+    
+    (
+        local count=0
+        local total=$(echo "$software_list" | wc -w)
+        
+        for app in $software_list; do
+            app=$(echo $app | tr -d '"')
+            count=$((count + 1))
+            local progress=$((count * 100 / total))
+            
+            echo "$progress"
+            echo "# Installing $app... ($count/$total)"
+            
+            case $app in
+                spotify) flatpak install -y flathub com.spotify.Client ;;
+                telegram) flatpak install -y flathub org.telegram.desktop ;;
+                firefox) flatpak install -y flathub org.mozilla.firefox ;;
+                chrome) flatpak install -y flathub com.google.Chrome ;;
+                vscode) flatpak install -y flathub com.visualstudio.code ;;
+                blender) flatpak install -y flathub org.blender.Blender ;;
+                gimp) flatpak install -y flathub org.gimp.GIMP ;;
+                inkscape) flatpak install -y flathub org.inkscape.Inkscape ;;
+            esac
+        done
+    ) | dialog --backtitle "RaptorOS Welcome" \
+               --title "Installing $category" \
+               --gauge "Starting installation..." 10 70 0
+    
+    dialog --msgbox "$category installation complete!" 8 50
+}
+
+# Legacy function for compatibility
+install_gaming_software() {
+    software_center
+}
+
+# Enhanced Performance Tuning - Toggle CPU governors and GPU profiles
+performance_tuning() {
+    while true; do
+        local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                             --title "⚡ Performance Tuning" \
+                             --menu "\nSelect performance tuning option:" \
+                             20 65 8 \
+                             "1" "🖥️  CPU Governor Control" \
+                             "2" "🎮 GPU Performance Profiles" \
+                             "3" "💾 Memory & ZRAM" \
+                             "4" "🌐 Network Optimization" \
+                             "5" "🔊 Audio Latency" \
+                             "6" "🖱️  Input Device Tuning" \
+                             "7" "📊 Performance Monitoring" \
+                             "8" "Back to Main Menu" \
+                             3>&1 1>&2 2>&3)
+        
+        case $choice in
+            1) cpu_governor_control ;;
+            2) gpu_performance_profiles ;;
+            3) memory_zram_tuning ;;
+            4) network_optimization ;;
+            5) audio_latency_tuning ;;
+            6) input_device_tuning ;;
+            7) performance_monitoring ;;
+            8|"") break ;;
+        esac
+    done
+}
+
+# CPU Governor Control
+cpu_governor_control() {
+    # Get current governor
+    local current_gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
+    local available_govs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null)
+    
+    # Create governor list
+    local gov_list=""
+    local gov_values=""
+    
+    for gov in $available_govs; do
+        if [[ "$gov" == "$current_gov" ]]; then
+            gov_list+="\"$gov\" \"$gov (Current)\" ON "
+        else
+            gov_list+="\"$gov\" \"$gov\" OFF "
+        fi
+        gov_values+="$gov "
+    done
+    
+    local selected_gov=$(dialog --backtitle "RaptorOS Welcome" \
+                                --title "🖥️  CPU Governor Control" \
+                                --radiolist "\nCurrent Governor: \Z2$current_gov\Zn\n\nSelect new CPU governor:" \
+                                15 60 8 $gov_list 3>&1 1>&2 2>&3)
+    
+    if [ $? -eq 0 ] && [ ! -z "$selected_gov" ]; then
+        selected_gov=$(echo $selected_gov | tr -d '"')
+        
+        # Apply governor
+        if sudo cpupower frequency-set -g "$selected_gov" 2>/dev/null; then
+            dialog --msgbox "✓ CPU Governor changed to: $selected_gov\n\nPerformance impact:\n$(get_governor_info "$selected_gov")" 12 60
+        else
+            dialog --msgbox "✗ Failed to change CPU governor. Try running with sudo." 8 60
+        fi
+    fi
+}
+
+# Get governor information
+get_governor_info() {
+    local gov="$1"
+    case $gov in
+        performance) echo "• Maximum performance\n• Higher power consumption\n• Best for gaming" ;;
+        schedutil) echo "• Balanced performance\n• Adaptive to load\n• Good for gaming" ;;
+        ondemand) echo "• Dynamic scaling\n• Moderate power usage\n• Decent for gaming" ;;
+        powersave) echo "• Minimum power usage\n• Lower performance\n• Not recommended for gaming" ;;
+        conservative) echo "• Gradual scaling\n• Balanced approach\n• Moderate for gaming" ;;
+        userspace) echo "• Manual control\n• User-defined\n• Advanced users only" ;;
+        *) echo "• Custom governor\n• Check documentation" ;;
+    esac
+}
+
+# GPU Performance Profiles
+gpu_performance_profiles() {
+    local gpu_type=""
+    local gpu_info=""
+    
+    # Detect GPU type
+    if lsmod | grep -q nvidia; then
+        gpu_type="nvidia"
+        gpu_info=$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits 2>/dev/null | head -1)
+    elif lsmod | grep -q amdgpu; then
+        gpu_type="amd"
+        gpu_info=$(lspci | grep VGA | grep AMD | cut -d: -f3 | xargs)
+    elif lsmod | grep -q i915; then
+        gpu_type="intel"
+        gpu_info=$(lspci | grep VGA | grep Intel | cut -d: -f3 | xargs)
+    else
+        gpu_type="unknown"
+        gpu_info="Unknown GPU"
+    fi
+    
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🎮 GPU Performance Profiles" \
+                          --menu "\nGPU: $gpu_info\nType: $gpu_type\n\nSelect action:" \
+                          15 60 6 \
+                          "1" "🚀 Maximum Performance" \
+                          "2" "⚖️  Balanced Mode" \
+                          "3" "💡 Power Saving" \
+                          "4" "🔧 Custom Settings" \
+                          "5" "📊 GPU Status" \
+                          "6" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) apply_gpu_profile "max" ;;
+        2) apply_gpu_profile "balanced" ;;
+        3) apply_gpu_profile "powersave" ;;
+        4) custom_gpu_settings ;;
+        5) show_gpu_status ;;
+        6) return ;;
+    esac
+}
+
+# Apply GPU profile
+apply_gpu_profile() {
+    local profile="$1"
+    
+    case $profile in
+        max)
+            if lsmod | grep -q nvidia; then
+                # NVIDIA maximum performance
+                sudo nvidia-smi -pm 1 2>/dev/null
+                sudo nvidia-smi -pl 350 2>/dev/null
+                dialog --msgbox "✓ NVIDIA GPU set to maximum performance\n\n• Performance mode: Enabled\n• Power limit: 350W\n• GPU boost: Enabled" 12 60
+            elif lsmod | grep -q amdgpu; then
+                # AMD maximum performance
+                echo "high" | sudo tee /sys/class/drm/card0/device/power_dpm_force_performance_level >/dev/null 2>&1
+                dialog --msgbox "✓ AMD GPU set to maximum performance\n\n• Performance level: High\n• Power management: Performance" 10 60
+            else
+                dialog --msgbox "GPU profile not supported for this GPU type" 8 50
+            fi
+            ;;
+        balanced)
+            if lsmod | grep -q nvidia; then
+                sudo nvidia-smi -pm 0 2>/dev/null
+                dialog --msgbox "✓ NVIDIA GPU set to balanced mode\n\n• Performance mode: Adaptive\n• Power management: Auto" 10 60
+            elif lsmod | grep -q amdgpu; then
+                echo "auto" | sudo tee /sys/class/drm/card0/device/power_dpm_force_performance_level >/dev/null 2>&1
+                dialog --msgbox "✓ AMD GPU set to balanced mode\n\n• Performance level: Auto\n• Power management: Adaptive" 10 60
+            fi
+            ;;
+        powersave)
+            if lsmod | grep -q nvidia; then
+                sudo nvidia-smi -pm 0 2>/dev/null
+                sudo nvidia-smi -pl 100 2>/dev/null
+                dialog --msgbox "✓ NVIDIA GPU set to maximum performance\n\n• Performance mode: Adaptive\n• Power limit: 100W\n• GPU boost: Limited" 12 60
+            elif lsmod | grep -q amdgpu; then
+                echo "low" | sudo tee /sys/class/drm/card0/device/power_dpm_force_performance_level >/dev/null 2>&1
+                dialog --msgbox "✓ AMD GPU set to power saving\n\n• Performance level: Low\n• Power management: Power saving" 10 60
+            fi
+            ;;
+    esac
+}
+
+# Custom GPU settings
+custom_gpu_settings() {
+    if lsmod | grep -q nvidia; then
+        local power_limit=$(dialog --inputbox "Enter NVIDIA GPU power limit (W):" 8 50 "200" 3>&1 1>&2 2>&3)
+        if [ $? -eq 0 ] && [ ! -z "$power_limit" ]; then
+            if sudo nvidia-smi -pl "$power_limit" 2>/dev/null; then
+                dialog --msgbox "✓ NVIDIA GPU power limit set to ${power_limit}W" 8 50
+            else
+                dialog --msgbox "✗ Failed to set power limit" 8 50
+            fi
+        fi
+    else
+        dialog --msgbox "Custom GPU settings only available for NVIDIA GPUs" 8 60
+    fi
+}
+
+# Show GPU status
+show_gpu_status() {
+    local status_info=""
+    
+    if lsmod | grep -q nvidia; then
+        status_info=$(nvidia-smi --query-gpu=name,temperature.gpu,power.draw,utilization.gpu --format=csv,noheader 2>/dev/null | head -1)
+        dialog --msgbox "NVIDIA GPU Status:\n\n$status_info" 10 60
+    elif lsmod | grep -q amdgpu; then
+        local perf_level=$(cat /sys/class/drm/card0/device/power_dpm_force_performance_level 2>/dev/null)
+        dialog --msgbox "GPU Status:\n\nPerformance Level: $perf_level" 8 50
+    else
+        dialog --msgbox "GPU status not available" 8 40
+    fi
+}
+
+# Memory & ZRAM tuning
+memory_zram_tuning() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "💾 Memory & ZRAM Tuning" \
+                          --menu "\nSelect memory optimization:" \
+                          15 60 6 \
+                          "1" "🚀 Enable ZRAM" \
+                          "2" "⚡ Configure ZRAM" \
+                          "3" "🔍 Memory Status" \
+                          "4" "🧹 Clear Caches" \
+                          "5" "📊 Memory Info" \
+                          "6" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) enable_zram ;;
+        2) configure_zram ;;
+        3) show_memory_status ;;
+        4) clear_memory_caches ;;
+        5) show_memory_info ;;
+        6) return ;;
+    esac
+}
+
+# Enable ZRAM
+enable_zram() {
+    if lsmod | grep -q zram; then
+        dialog --msgbox "ZRAM is already enabled" 8 40
+        return
+    fi
+    
+    if sudo modprobe zram; then
+        # Configure ZRAM
+        echo lz4 | sudo tee /sys/block/zram0/comp_algorithm >/dev/null 2>&1
+        echo 8G | sudo tee /sys/block/zram0/disksize >/dev/null 2>&1
+        
+        if sudo mkswap /dev/zram0 && sudo swapon -p 100 /dev/zram0; then
+            dialog --msgbox "✓ ZRAM enabled successfully!\n\n• Compression: LZ4\n• Size: 8GB\n• Priority: 100" 12 60
+        else
+            dialog --msgbox "✗ Failed to enable ZRAM swap" 8 50
+        fi
+    else
+        dialog --msgbox "✗ Failed to load ZRAM module" 8 50
+    fi
+}
+
+# Configure ZRAM
+configure_zram() {
+    if ! lsmod | grep -q zram; then
+        dialog --msgbox "ZRAM not enabled. Enable it first." 8 50
+        return
+    fi
+    
+    local size=$(dialog --inputbox "Enter ZRAM size (e.g., 4G, 8G, 16G):" 8 50 "8G" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$size" ]; then
+        if echo "$size" | sudo tee /sys/block/zram0/disksize >/dev/null 2>&1; then
+            dialog --msgbox "✓ ZRAM size updated to $size" 8 50
+        else
+            dialog --msgbox "✗ Failed to update ZRAM size" 8 50
+        fi
+    fi
+}
+
+# Show memory status
+show_memory_status() {
+    local mem_info=$(free -h)
+    local zram_status=""
+    
+    if lsmod | grep -q zram; then
+        zram_status="✓ ZRAM: Enabled"
+    else
+        zram_status="✗ ZRAM: Disabled"
+    fi
+    
+    dialog --msgbox "Memory Status:\n\n$mem_info\n\n$zram_status" 12 60
+}
+
+# Clear memory caches
+clear_memory_caches() {
+    dialog --yesno "Clear memory caches?\n\nThis will free up RAM but may temporarily slow down the system." 10 60
+    if [ $? -eq 0 ]; then
+        if sudo sync && sudo echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null 2>&1; then
+            dialog --msgbox "✓ Memory caches cleared" 8 50
+        else
+            dialog --msgbox "✗ Failed to clear caches" 8 50
+        fi
+    fi
+}
+
+# Show memory info
+show_memory_info() {
+    local mem_info=$(cat /proc/meminfo | grep -E "MemTotal|MemAvailable|MemFree|SwapTotal|SwapFree")
+    dialog --msgbox "Memory Information:\n\n$mem_info" 12 60
+}
+
+# Network optimization
+network_optimization() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🌐 Network Optimization" \
+                          --menu "\nSelect network optimization:" \
+                          15 60 6 \
+                          "1" "🚀 Gaming Network" \
+                          "2" "📡 TCP Optimization" \
+                          "3" "🔍 Network Status" \
+                          "4" "🌊 QoS Settings" \
+                          "5" "📊 Network Info" \
+                          "6" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) gaming_network_optimization ;;
+        2) tcp_optimization ;;
+        3) show_network_status ;;
+        4) qos_settings ;;
+        5) show_network_info ;;
+        6) return ;;
+    esac
+}
+
+# Gaming network optimization
+gaming_network_optimization() {
+    # Apply gaming network tweaks
+    sudo sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1
+    sudo sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1
+    sudo sysctl -w net.ipv4.tcp_fastopen=3 >/dev/null 2>&1
+    
+    dialog --msgbox "✓ Gaming network optimizations applied!\n\n• TCP Congestion: BBR\n• Queue Discipline: FQ\n• TCP Fast Open: Enabled" 12 60
+}
+
+# TCP optimization
+tcp_optimization() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "📡 TCP Optimization" \
+                          --menu "\nSelect TCP optimization:" \
+                          15 60 5 \
+                          "1" "🚀 Low Latency" \
+                          "2" "⚖️  Balanced" \
+                          "3" "💡 High Throughput" \
+                          "4" "🔧 Custom" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) apply_tcp_profile "low_latency" ;;
+        2) apply_tcp_profile "balanced" ;;
+        3) apply_tcp_profile "high_throughput" ;;
+        4) custom_tcp_settings ;;
+        5) return ;;
+    esac
+}
+
+# Apply TCP profile
+apply_tcp_profile() {
+    local profile="$1"
+    
+    case $profile in
+        low_latency)
+            sudo sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1
+            sudo sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1
+            sudo sysctl -w net.ipv4.tcp_window_scaling=1 >/dev/null 2>&1
+            dialog --msgbox "✓ Low latency TCP profile applied!\n\n• Congestion Control: BBR\n• Queue Discipline: FQ\n• Window Scaling: Enabled" 12 60
+            ;;
+        balanced)
+            sudo sysctl -q net.ipv4.tcp_congestion_control=cubic >/dev/null 2>&1
+            sudo sysctl -w net.core.default_qdisc=fq_codel >/dev/null 2>&1
+            dialog --msgbox "✓ Balanced TCP profile applied!\n\n• Congestion Control: CUBIC\n• Queue Discipline: FQ_CODEL" 10 60
+            ;;
+        high_throughput)
+            sudo sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1
+            sudo sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1
+            sudo sysctl -w net.core.rmem_max=16777216 >/dev/null 2>&1
+            dialog --msgbox "✓ High throughput TCP profile applied!\n\n• Congestion Control: BBR\n• Queue Compatibility: FQ\n• Receive Buffer: 16MB" 12 60
+            ;;
+    esac
+}
+
+# Custom TCP settings
+custom_tcp_settings() {
+    local buffer_size=$(dialog --inputbox "Enter TCP receive buffer size (MB):" 8 50 "16" 8 50 "16" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$buffer_size" ]; then
+        local bytes=$((buffer_size * 1024 * 1024))
+        if sudo sysctl -w net.core.rmem_max="$bytes" >/dev/null 2>&1; then
+            dialog --msgbox "✓ TCP receive buffer set to ${buffer_size}MB" 8 50
+        else
+            dialog --msgbox "✗ Failed to set TCP buffer size" 8 50
+        fi
+    fi
+}
+
+# Show network status
+show_network_status() {
+    local tcp_congestion=$(sysctl net.ipv4.tcp_congestion_control | cut -d= -f2)
+    local queue_disc=$(tc qdisc show | head -1 | cut -d' ' -f2)
+    
+    dialog --msgbox "Network Status:\n\n• TCP Congestion: $tcp_congestion\n• Queue Discipline: $queue_disc" 10 60
+}
+
+# QoS settings
+qos_settings() {
+    dialog --msgbox "QoS Settings:\n\nTo configure Quality of Service:\n\n1. Install wondershaper\n2. Run: sudo wondershaper eth0 1000 1000\n\nThis sets both upload and download to 1Gbps" 12 60
+}
+
+# Show network info
+show_network_info() {
+    local net_info=$(ip addr show | grep -E "inet|ether" | head -10)
+    dialog --msgbox "Network Information:\n\n$net_info" 12 60
+}
+
+# Audio latency tuning
+audio_latency_tuning() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🔊 Audio Latency Tuning" \
+                          --menu "\nSelect audio optimization:" \
+                          15 60 5 \
+                          "1" "⚡ Low Latency" \
+                          "2" "🎵 High Quality" \
+                          "3" "🔧 Custom Settings" \
+                          4" "📊 Audio Status" \
+                          5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) apply_audio_profile "low_latency" ;;
+        2) apply_audio_profile "high_quality" ;;
+        3) custom_audio_settings ;;
+        4) show_audio_status ;;
+        5) return ;;
+    esac
+}
+
+# Apply audio profile
+apply_audio_profile() {
+    local profile="$1"
+    
+    case $profile in
+        low_latency)
+            # Set audio priority
+            echo "@audio - rtprio 95" | sudo tee -a /etc/security/limits.conf >/dev/null 2>&1
+            echo "@audio - memlock unlimited" | sudo tee -a /etc/security/limits.conf >/dev/null 2>&1
+            
+            # PulseAudio low latency
+            if [ -f ~/.config/pulse/daemon.conf ]; then
+                echo "default-fragments = 2" >> ~/.config/pulse/daemon.conf
+                echo "default-fragment-size-msec = 5" >> ~/.config/pulse/daemon.conf
+            fi
+            
+            dialog --msgbox "✓ Low latency audio profile applied!\n\n• Audio Priority: 95\n• Memory Lock: Unlimited\n• Fragment Size: 5ms" 12 60
+            ;;
+        high_quality)
+            # Set audio priority
+            echo "@audio - rtprio 50" | sudo tee -a /etc/security/limits.conf >/dev/null 2>&1
+            
+            # PulseAudio high quality
+            if [ -f ~/.config/pulse/daemon.conf ]; then
+                echo "default-fragments = 8" >> ~/.config/pulse/daemon.conf
+                echo "default-fragment-size-msec = 25" >> ~/.config/daemon.conf
+            fi
+            
+            dialog --msgbox "✓ High quality audio profile applied!\n\n• Audio Priority: 50\n• Fragment Size: 25ms" 10 60
+            ;;
+    esac
+}
+
+# Custom audio settings
+custom_audio_settings() {
+    local fragment_size=$(dialog --inputbox "Enter fragment size (ms):" 8 50 "10" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$fragment_size" ]; then
+        if [ -f ~/.config/pulse/daemon.conf ]; then
+            echo "default-fragment-size-msec = $fragment_size" >> ~/.config/pulse/daemon.conf
+            echo "default-fragment-size-msec = $fragment_size" >> ~/.config/pulse/daemon.conf
+        else
+            dialog --msgbox "✗ PulseAudio config not found" 8 50
+        fi
+    fi
+}
+
+# Show audio status
+show_audio_status() {
+    local audio_priority=$(grep "@audio.*rtprio" /etc/security/limits.conf | head -1 | awk '{print $4}' || echo "Not set")
+    local pulse_status=$(pulseaudio --check && echo "Running" || echo "Not running")
+    
+    dialog --msgbox "Audio Status:\n\n• Audio Priority: $audio_priority\n• PulseAudio: $pulse_status" 10 60
+}
+
+# Input device tuning
+input_device_tuning() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🖱️  Input Device Tuning" \
+                          --menu "\nSelect input optimization:" \
+                          15 60 5 \
+                          "1" "🖱️  Mouse Polling" \
+                          "2" "⌨️  Keyboard Latency" \
+                          "3" "🎮 Gamepad Settings" \
+                          "4" "📊 Input Status" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) mouse_polling_tuning ;;
+        2) keyboard_latency_tuning ;;
+        3) gamepad_settings ;;
+        4) show_input_status ;;
+        5) return ;;
+    esac
+}
+
+# Mouse polling tuning
+mouse_polling_tuning() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🖱️  Mouse Polling" \
+                          --menu "\nSelect mouse polling rate:" \
+                          15 60 5 \
+                          "1" "1000Hz (1ms) - Maximum" \
+                          "2" "500Hz (2ms) - High" \
+                          "3" "250Hz (4ms) - Standard" \
+                          "4" "125Hz (8ms) - Low" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) set_mouse_polling 1 ;;
+        2) set_mouse_polling 2 ;;
+        3) set_mouse_polling 4 ;;
+        4) set_mouse_polling 8 ;;
+        5) return ;;
+    esac
+}
+
+# Set mouse polling
+set_mouse_polling() {
+    local rate="$1"
+    local interval="$((1000 / rate))"
+    
+    # Create modprobe config
+    echo "options usbhid mousepoll=$interval" | sudo tee /etc/modprobe.d/mouse.conf >/dev/null 2>&1
+    
+    dialog --msgbox "✓ Mouse polling set to ${rate}Hz (${interval}ms)\n\nReboot required for changes to take effect." 10 60
+}
+
+# Keyboard latency tuning
+keyboard_latency_tuning() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "⌨️  Keyboard Latency" \
+                          --menu "\nSelect keyboard optimization:" \
+                          15 60 4 \
+                          "1" "⚡ Low Latency" \
+                          "2" "⚖️  Balanced" \
+                          "3" "💡 Power Saving" \
+                          "4" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) set_keyboard_profile "low_latency" ;;
+        2) set_keyboard_profile "balanced" ;;
+        3) set_keyboard_profile "powersave" ;;
+        4) return ;;
+    esac
+}
+
+# Set keyboard profile
+set_keyboard_profile() {
+    local profile="$1"
+    
+    case $profile in
+        low_latency)
+            echo "options usbhid kbd_poll=1" | sudo tee /etc/modprobe.d/keyboard.conf >/dev/null 2>&1
+            dialog --msgbox "✓ Low latency keyboard profile applied!\n\n• Polling: 1ms\n• Reboot required" 10 60
+            ;;
+        balanced)
+            echo "options usbhid kbd_poll=8" | sudo tee /etc/modprobe.d/keyboard.conf >/dev/null 2>&1
+            dialog --msgbox "✓ Balanced keyboard profile applied!\n\n• Polling: 8ms\n• Reboot required" 10 60
+            ;;
+        powersave)
+            echo "options ushbhid kbd_poll=16" | sudo tee /etc/modprobe.d/keyboard.conf >/dev/null 2>&1
+            dialog --msgbox "✓ Power saving keyboard profile applied!\n\n• Reboot required" 10 60
+            ;;
+    esac
+}
+
+# Gamepad settings
+gamepad_settings() {
+    dialog --msgbox "Gamepad Settings:\n\n• Enable gamepad support: sudo modprobe uinput\n• Calibrate gamepad: jstest-gtk\n• Test gamepad: jstest /dev/input/js0" 12 60
+}
+
+# Show input status
+show_input_status() {
+    local mouse_devices=$(ls /dev/input/mouse* 2>/dev/null | wc -l)
+    local keyboard_devices=$(ls /dev/input/event* 2>/dev/null | grep -c "event" || echo "0")
+    local gamepad_devices=$(ls /dev/input/js* 2>/dev/null | wc -l)
+    
+    dialog --msgbox "Input Device Status:\n\n• Mouse devices: $mouse_devices\n• Keyboard devices: $keyboard_devices\n• Gamepad devices: $gamepad_devices" 12 60
+}
+
+# Performance monitoring
+performance_monitoring() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "📊 Performance Monitoring" \
+                          --menu "\nSelect monitoring option:" \
+                          15 60 5 \
+                          "1" "📈 Real-time Monitor" \
+                          "2" "🔍 System Resources" \
+                          "3" "🎮 Gaming Performance" \
+                          "4" "📊 Benchmark Results" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) real_time_monitor ;;
+        2) system_resources ;;
+        3) gaming_performance ;;
+        4) benchmark_results ;;
+        5) return ;;
+    esac
+}
+
+# Real-time monitor
+real_time_monitor() {
+    dialog --msgbox "Real-time monitoring:\n\n• htop - Process monitoring\n• iotop - I/O monitoring\n• nethogs - Network monitoring\n• btop - Resource monitor\n\nRun these commands in terminal for live monitoring." 15 60
+}
+
+# System resources
+system_resources() {
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+    local mem_usage=$(free | grep Mem | awk '{printf "%.1f", $3/$2 * 100.0}')
+    local disk_usage=$(df / | tail -1 | awk '{print $5}')
+    
+    dialog --msgbox "System Resources:\n\n• CPU Usage: ${cpu_usage}%\n• Memory Usage: ${mem_usage}%\n• Disk Usage: $disk_usage" 12 60
+}
+
+# Gaming performance
+gaming_performance() {
+    if command -v gamemoded &>/dev/null; then
+        local gamemode_status=$(systemctl --user is-active gamemoded)
+        dialog --msgbox "Gaming Performance:\n\n• GameMode: $gamemode_status\n• Toggle: Super+G\n• Status: gamemoded --status" 12 60
+        else
+        dialog --msgbox "Gaming Performance:\n\n• GameMode: Not installed\n• Install: emerge games-util/gamemode" 10 60
+    fi
+}
+
+# Benchmark results
+benchmark_results() {
+    if [ -f /usr/local/bin/raptoros-benchmark ]; then
+        dialog --yesno "Run system benchmark now?\n\nThis will test CPU, GPU, and memory performance." 10 60
+        if [ $? -eq 0 ]; then
+            clear
+            raptoros-benchmark
+            read -p "Press Enter to continue..."
+        fi
+    else
+        dialog --msgbox "Benchmark tool not found.\n\nInstall: emerge app-benchmarks/stress-ng" 10 60
+    fi
+}
+
+# Legacy function for compatibility
+optimize_performance() {
+    performance_tuning
+}
+
+# Game Compatibility - Integrate game-compatibility script
+game_compatibility() {
+    while true; do
+        local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                             --title "🎮 Game Compatibility" \
+                             --menu "\nSelect game compatibility option:" \
+                             20 65 8 \
+                             "1" "🔍 Check Game Compatibility" \
+                             "2" "📋 Popular Games List" \
+                             "3" "🛠️  Wine/Proton Setup" \
+                             "4" "🎯 Performance Tips" \
+                             "5" "📊 Compatibility Database" \
+                             "6" "🔧 Troubleshooting" \
+                             "7" "📚 Documentation" \
+                             "8" "Back to Main Menu" \
+                             3>&1 1>&2 2>&3)
+        
+        case $choice in
+            1) check_game_compatibility ;;
+            2) popular_games_list ;;
+            3) wine_proton_setup ;;
+            4) performance_tips ;;
+            5) compatibility_database ;;
+            6) troubleshooting ;;
+            7) documentation ;;
+            8|"") break ;;
+        esac
+    done
+}
+
+# Check game compatibility
+check_game_compatibility() {
+    local game_name=$(dialog --inputbox "Enter game name to check:" 8 60 "" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$game_name" ]; then
+        # Run compatibility check
+        clear
+        echo "Checking compatibility for: $game_name"
+        echo "=================================="
+        
+        # Check if game is in database
+        if [ -f /usr/local/bin/game-compatibility ]; then
+            game-compatibility check "$game_name"
+        else
+            echo "Game compatibility tool not found."
+            echo "Install it with: emerge games-util/game-compatibility"
+        fi
+        
+        read -p "Press Enter to continue..."
+    fi
+}
+
+# Popular games list
+popular_games_list() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "📋 Popular Games" \
+                          --menu "\nSelect game category:" \
+                          20 65 6 \
+                          "1" "🎮 AAA Games" \
+                          "2" "🏆 Competitive" \
+                          "3" "🎨 Indie Games" \
+                          "4" "🕹️  Retro Games" \
+                          "5" "🌐 Online Games" \
+                          "6" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) show_aaa_games ;;
+        2) show_competitive_games ;;
+        3) show_indie_games ;;
+        4) show_retro_games ;;
+        5) show_online_games ;;
+        6) return ;;
+    esac
+}
+
+# Show AAA games
+show_aaa_games() {
+    local games=""
+    games+="• Cyberpunk 2077 - Excellent (Proton)\n"
+    games+="• Red Dead Redemption 2 - Excellent (Proton)\n"
+    games+="• The Witcher 3 - Native Linux\n"
+    games+="• Elden Ring - Excellent (Proton)\n"
+    games+="• God of War - Excellent (Proton)\n"
+    games+="• Horizon Zero Dawn - Excellent (Proton)\n"
+    games+="• Death Stranding - Excellent (Proton)\n"
+    games+="• Control - Excellent (Proton)\n"
+    
+    dialog --msgbox "AAA Games Compatibility:\n\n$games\n\nMost AAA games work excellently with Proton!" 20 70
+}
+
+# Show competitive games
+show_competitive_games() {
+    local games=""
+    games+="• Counter-Strike 2 - Native Linux\n"
+    games+="• Dota 2 - Native Linux\n"
+    games+="• League of Legends - Excellent (Wine)\n"
+    games+="• Valorant - Not Supported (Anti-cheat)\n"
+    games+="• Overwatch 2 - Excellent (Proton)\n"
+    games+="• Rainbow Six Siege - Excellent (Proton)\n"
+    games+="• Rocket League - Excellent (Proton)\n"
+    games+="• Fortnite - Not Supported (Anti-cheat)\n"
+    
+    dialog --msgbox "Competitive Games Compatibility:\n\n$games\n\nMost competitive games work well, except those with aggressive anti-cheat." 20 70
+}
+
+# Show indie games
+show_indie_games() {
+    local games=""
+    games+="• Minecraft - Native Linux\n"
+    games+="• Terraria - Native Linux\n"
+    games+="• Stardew Valley - Native Linux\n"
+    games+="• Hollow Knight - Native Linux\n"
+    games+="• Celeste - Native Linux\n"
+    games+="• Undertale - Native Linux\n"
+    games+="• Cuphead - Excellent (Proton)\n"
+    games+="• Hades - Excellent (Proton)\n"
+    
+    dialog --msgbox "Indie Games Compatibility:\n\n$games\n\nMost indie games have excellent Linux support!" 20 70
+}
+
+# Show retro games
+show_retro_games() {
+    local games=""
+    games+="• RetroArch - Native Linux\n"
+    games+="• Dolphin (GameCube/Wii) - Native Linux\n"
+    games+="• PPSSPP (PSP) - Native Linux\n"
+    games+="• Citra (3DS) - Native Linux\n"
+    games+="• Yuzu (Switch) - Native Linux\n"
+    games+="• RPCS3 (PS3) - Native Linux\n"
+    games+="• Cemu (Wii U) - Excellent (Wine)\n"
+    games+="• MAME (Arcade) - Native Linux\n"
+    
+    dialog --msgbox "Retro Games Compatibility:\n\n$games\n\nRetro gaming is excellent on Linux!" 20 70
+}
+
+# Show online games
+show_online_games() {
+    local games=""
+    games+="• World of Warcraft - Excellent (Wine)\n"
+    games+="• Final Fantasy XIV - Excellent (Proton)\n"
+    games+="• Genshin Impact - Excellent (Wine)\n"
+    games+="• Path of Exile - Excellent (Proton)\n"
+    games+="• Warframe - Excellent (Proton)\n"
+    games+="• Destiny 2 - Not Supported (Anti-cheat)\n"
+    games+="• Apex Legends - Not Supported (Anti-cheat)\n"
+    games+="• PUBG - Not Supported (Anti-cheat)\n"
+    
+    dialog --msgbox "Online Games Compatibility:\n\n$games\n\nMMOs and online games work well, except those with aggressive anti-cheat." 20 70
+}
+
+# Wine/Proton setup
+wine_proton_setup() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🛠️  Wine/Proton Setup" \
+                          --menu "\nSelect Wine/Proton option:" \
+                          15 60 6 \
+                          "1" "🍷 Install Wine" \
+                          "2" "🚀 Install Proton" \
+                          "3" "⚙️  Configure Wine" \
+                          "4" "📁 Wine Prefixes" \
+                          "5" "🔧 DXVK/VKD3D" \
+                          "6" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) install_wine ;;
+        2) install_proton ;;
+        3) configure_wine ;;
+        4) wine_prefixes ;;
+        5) dxvk_vkd3d ;;
+        6) return ;;
+    esac
+}
+
+# Install Wine
+install_wine() {
+    dialog --yesno "Install Wine for Windows game compatibility?\n\nThis will install:\n• Wine (latest stable)\n• Wine-mono\n• Wine-gecko\n• Winetricks" 12 60
+    
+    if [ $? -eq 0 ]; then
+        clear
+        echo "Installing Wine..."
+        emerge -q app-emulation/wine-staging app-emulation/wine-mono app-emulation/wine-gecko app-emulation/winetricks
+        
+        if [ $? -eq 0 ]; then
+            dialog --msgbox "✓ Wine installed successfully!\n\nYou can now run Windows games with: wine game.exe" 10 60
+        else
+            dialog --msgbox "✗ Wine installation failed. Check the terminal for errors." 10 60
+        fi
+    fi
+}
+
+# Install Proton
+install_proton() {
+    dialog --msgbox "Proton is included with Steam by default.\n\nTo use Proton:\n1. Install Steam\n2. Enable Steam Play in Steam settings\n3. Right-click game → Properties → Compatibility\n4. Check 'Force the use of a specific Steam Play compatibility tool'" 12 70
+}
+
+# Configure Wine
+configure_wine() {
+    if ! command -v wine &>/dev/null; then
+        dialog --msgbox "Wine not installed. Install it first." 8 50
+        return
+    fi
+    
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "⚙️  Wine Configuration" \
+                          --menu "\nSelect configuration option:" \
+                          15 60 5 \
+                          "1" "🔧 Winecfg" \
+                          "2" "📁 Create Prefix" \
+                          "3" "🔄 Update Prefix" \
+                          "4" "🧹 Clean Prefix" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) winecfg ;;
+        2) create_wine_prefix ;;
+        3) update_wine_prefix ;;
+        4) clean_wine_prefix ;;
+        5) return ;;
+    esac
+}
+
+# Wine configuration
+winecfg() {
+    clear
+    echo "Opening Wine configuration..."
+    winecfg
+}
+
+# Create Wine prefix
+create_wine_prefix() {
+    local prefix_path=$(dialog --inputbox "Enter prefix path:" 8 60 "$HOME/.wine" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$prefix_path" ]; then
+        clear
+        echo "Creating Wine prefix at: $prefix_path"
+        WINEPREFIX="$prefix_path" wineboot --init
+        read -p "Press Enter to continue..."
+    fi
+}
+
+# Update Wine prefix
+update_wine_prefix() {
+    local prefix_path=$(dialog --inputbox "Enter prefix path to update:" 8 60 "$HOME/.wine" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$prefix_path" ]; then
+        clear
+        echo "Updating Wine prefix at: $prefix_path"
+        WINEPREFIX="$prefix_path" wineboot --update
+        read -p "Press Enter to continue..."
+    fi
+}
+
+# Clean Wine prefix
+clean_wine_prefix() {
+    local prefix_path=$(dialog --inputbox "Enter prefix path to clean:" 8 60 "$HOME/.wine" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$prefix_path" ]; then
+        dialog --yesno "This will delete the Wine prefix at:\n$prefix_path\n\nAre you sure?" 10 60
+        if [ $? -eq 0 ]; then
+            rm -rf "$prefix_path"
+            dialog --msgbox "✓ Wine prefix cleaned" 8 50
+        fi
+    fi
+}
+
+# Wine prefixes
+wine_prefixes() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "📁 Wine Prefixes" \
+                          --menu "\nSelect prefix option:" \
+                          15 60 5 \
+                          "1" "📋 List Prefixes" \
+                          "2" "🔍 Prefix Info" \
+                          "3" "📊 Prefix Size" \
+                          "4" "🧹 Clean All" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) list_wine_prefixes ;;
+        2) prefix_info ;;
+        3) prefix_size ;;
+        4) clean_all_prefixes ;;
+        5) return ;;
+    esac
+}
+
+# List Wine prefixes
+list_wine_prefixes() {
+    local prefixes=$(find ~/.wine* ~/.local/share/wineprefixes -maxdepth 0 -type d 2>/dev/null)
+    if [ -z "$prefixes" ]; then
+        dialog --msgbox "No Wine prefixes found" 8 40
+        return
+    fi
+    
+    local prefix_list=""
+    for prefix in $prefixes; do
+        prefix_list+="• $prefix\n"
+    done
+    
+    dialog --msgbox "Wine Prefixes Found:\n\n$prefix_list" 15 60
+}
+
+# Prefix info
+prefix_info() {
+    local prefix_path=$(dialog --inputbox "Enter prefix path:" 8 60 "$HOME/.wine" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$prefix_path" ]; then
+        if [ -d "$prefix_path" ]; then
+            local wine_version=$(WINEPREFIX="$prefix_path" wine --version 2>/dev/null)
+            local prefix_size=$(du -sh "$prefix_path" 2>/dev/null | cut -f1)
+            
+            dialog --msgbox "Prefix Information:\n\n• Path: $prefix_path\n• Wine Version: $wine_version\n• Size: $prefix_size" 12 60
+        else
+            dialog --msgbox "Prefix not found: $prefix_path" 8 50
+        fi
+    fi
+}
+
+# Prefix size
+prefix_size() {
+    local prefix_path=$(dialog --inputbox "Enter prefix path:" 8 60 "$HOME/.wine" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$prefix_path" ]; then
+        if [ -d "$prefix_path" ]; then
+            local size=$(du -sh "$prefix_path" 2>/dev/null | cut -f1)
+            dialog --msgbox "Prefix Size:\n\n$prefix_path: $size" 10 60
+        else
+            dialog --msgbox "Prefix not found: $prefix_path" 8 50
+        fi
+    fi
+}
+
+# Clean all prefixes
+clean_all_prefixes() {
+    dialog --yesno "This will delete ALL Wine prefixes!\n\nAre you absolutely sure?" 10 60
+    if [ $? -eq 0 ]; then
+        find ~/.wine* ~/.local/share/wineprefixes -maxdepth 0 -type d -exec rm -rf {} \; 2>/dev/null
+        dialog --msgbox "✓ All Wine prefixes cleaned" 8 50
+    fi
+}
+
+# DXVK/VKD3D
+dxvk_vkd3d() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🔧 DXVK/VKD3D" \
+                          --menu "\nSelect option:" \
+                          15 60 5 \
+                          "1" "📦 Install DXVK" \
+                          "2" "📦 Install VKD3D" \
+                          "3" "📊 Status" \
+                          "4" "🔄 Update" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) install_dxvk ;;
+        2) install_vkd3d ;;
+        3) dxvk_vkd3d_status ;;
+        4) update_dxvk_vkd3d ;;
+        5) return ;;
+    esac
+}
+
+# Install DXVK
+install_dxvk() {
+    clear
+    echo "Installing DXVK..."
+    emerge -q app-emulation/dxvk
+    if [ $? -eq 0 ]; then
+        dialog --msgbox "✓ DXVK installed successfully!\n\nDXVK translates DirectX 9/10/11 to Vulkan for better performance." 10 60
+    else
+        dialog --msgbox "✗ DXVK installation failed" 8 50
+    fi
+}
+
+# Install VKD3D
+install_vkd3d() {
+    clear
+    echo "Installing VKD3D..."
+    emerge -q app-emulation/vkd3d
+    if [ $? -eq 0 ]; then
+        dialog --msgbox "✓ VKD3D installed successfully!\n\nVKD3D translates DirectX 12 to Vulkan." 10 60
+    else
+        dialog --msgbox "✗ VKD3D installation failed" 8 50
+    fi
+}
+
+# DXVK/VKD3D status
+dxvk_vkd3d_status() {
+    local dxvk_installed=$(emerge -p app-emulation/dxvk 2>/dev/null | grep -q "ebuild" && echo "Installed" || echo "Not installed")
+    local vkd3d_installed=$(emerge -p app-emulation/vkd3d 2>/dev/null | grep -q "ebuild" && echo "Installed" || echo "Not installed")
+    
+    dialog --msgbox "DXVK/VKD3D Status:\n\n• DXVK: $dxvk_installed\n• VKD3D: $vkd3d_installed" 10 60
+}
+
+# Update DXVK/VKD3D
+update_dxvk_vkd3d() {
+    clear
+    echo "Updating DXVK and VKD3D..."
+    emerge -u app-emulation/dxvk app-emulation/vkd3d
+    read -p "Press Enter to continue..."
+}
+
+# Performance tips
+performance_tips() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🎯 Performance Tips" \
+                          --menu "\nSelect performance tip category:" \
+                          15 60 5 \
+                          "1" "🚀 General Tips" \
+                          "2" "🎮 Gaming Tips" \
+                          "3" "🍷 Wine Tips" \
+                          "4" "🔧 System Tips" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) general_performance_tips ;;
+        2) gaming_performance_tips ;;
+        3) wine_performance_tips ;;
+        4) system_performance_tips ;;
+        5) return ;;
+    esac
+}
+
+# General performance tips
+general_performance_tips() {
+    dialog --msgbox "General Performance Tips:\n\n• Use performance CPU governor for gaming\n• Enable ZRAM for memory compression\n• Use BTRFS compression for storage\n• Keep system updated\n• Monitor system resources\n• Close unnecessary applications\n• Use lightweight desktop environments" 15 70
+}
+
+# Gaming performance tips
+gaming_performance_tips() {
+    dialog --msgbox "Gaming Performance Tips:\n\n• Enable GameMode for automatic optimization\n• Use MangoHud for performance monitoring\n• Disable compositing during games\n• Set mouse polling to 1000Hz\n• Use low-latency audio settings\n• Keep GPU drivers updated\n• Monitor temperatures and fan curves" 15 70
+}
+
+# Wine performance tips
+wine_performance_tips() {
+    dialog --msgbox "Wine Performance Tips:\n\n• Use DXVK for DirectX 9/10/11 games\n• Use VKD3D for DirectX 12 games\n• Enable fsync for better performance\n• Use Wine-GE or Wine-TKG for gaming\n• Keep Wine updated\n• Use separate prefixes for different games\n• Monitor Wine performance with MangoHud" 15 70
+}
+
+# System performance tips
+system_performance_tips() {
+    dialog --msgbox "System Performance Tips:\n\n• Use SSD for system and games\n• Enable TRIM for SSDs\n• Optimize I/O scheduler (kyber for NVMe)\n• Use BBR TCP congestion control\n• Enable TCP Fast Open\n• Monitor system resources\n• Keep kernel updated\n• Use performance monitoring tools" 15 70
+}
+
+# Compatibility database
+compatibility_database() {
+    dialog --msgbox "Compatibility Database:\n\n• ProtonDB: https://www.protondb.com\n• WineHQ: https://appdb.winehq.org\n• Lutris: https://lutris.net/games\n• Steam Play: Built into Steam\n• RaptorOS: Built-in compatibility checker\n\nUse these resources to check game compatibility!" 15 70
+}
+
+# Troubleshooting
+troubleshooting() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🔧 Troubleshooting" \
+                          --menu "\nSelect troubleshooting option:" \
+                          15 60 5 \
+                          "1" "❌ Common Issues" \
+                          "2" "🔍 Debug Tools" \
+                          "3" "📋 Logs" \
+                          "4" "🆘 Help" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) common_issues ;;
+        2) debug_tools ;;
+        3) view_logs ;;
+        4) get_help ;;
+        5) return ;;
+    esac
+}
+
+# Common issues
+common_issues() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "❌ Common Issues" \
+                          --menu "\nSelect common issue:" \
+                          20 60 8 \
+                          "1" "Game won't start" \
+                          "2" "Poor performance" \
+                          "3" "Audio issues" \
+                          "4" "Controller problems" \
+                          "5" "Graphics glitches" \
+                          "6" "Network issues" \
+                          "7" "Wine errors" \
+                          "8" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) game_wont_start ;;
+        2) poor_performance ;;
+        3) audio_issues ;;
+        4) controller_problems ;;
+        5) graphics_glitches ;;
+        6) network_issues ;;
+        7) wine_errors ;;
+        8) return ;;
+    esac
+}
+
+# Game won't start
+game_wont_start() {
+    dialog --msgbox "Game Won't Start:\n\n1. Check game compatibility\n2. Verify game files\n3. Check Wine/Proton version\n4. Look for error messages\n5. Check system requirements\n6. Try different Wine/Proton versions\n7. Check game logs\n8. Verify dependencies" 15 70
+}
+
+# Poor performance
+poor_performance() {
+    dialog --msgbox "Poor Performance:\n\n1. Check CPU governor (use performance)\n2. Monitor GPU usage and temperature\n3. Enable GameMode\n4. Check for background processes\n5. Verify DXVK/VKD3D installation\n6. Check Wine/Proton settings\n7. Monitor system resources\n8. Update drivers" 15 70
+}
+
+# Audio issues
+audio_issues() {
+    dialog --msgbox "Audio Issues:\n\n1. Check PulseAudio status\n2. Verify audio device selection\n3. Check Wine audio settings\n4. Test with native Linux apps\n5. Check audio priority settings\n6. Verify ALSA/PulseAudio configuration\n7. Check for audio conflicts\n8. Restart audio services" 15 70
+}
+
+# Controller problems
+controller_problems() {
+    dialog --msgbox "Controller Problems:\n\n1. Check controller detection\n2. Verify udev rules\n3. Test with jstest-gtk\n4. Check Wine controller settings\n5. Verify game controller support\n6. Check for conflicting drivers\n7. Test with native Linux games\n8. Update controller firmware" 15 70
+}
+
+# Graphics glitches
+graphics_glitches() {
+    dialog --msgbox "Graphics Glitches:\n\n1. Update graphics drivers\n2. Check DXVK/VKD3D version\n3. Verify Vulkan support\n4. Check Wine graphics settings\n5. Monitor GPU temperature\n6. Check for driver conflicts\n7. Try different Wine versions\n8. Verify OpenGL/Vulkan support" 15 70
+}
+
+# Network issues
+network_issues() {
+    dialog --msgbox "Network Issues:\n\n1. Check network connectivity\n2. Verify firewall settings\n3. Check DNS configuration\n4. Test with native Linux apps\n5. Check Wine network settings\n6. Verify port forwarding\n7. Check for network conflicts\n8. Test with different networks" 15 70
+}
+
+# Wine errors
+wine_errors() {
+    dialog --msgbox "Wine Errors:\n\n1. Check Wine version compatibility\n2. Verify Wine prefix integrity\n3. Check for missing dependencies\n4. Look for error logs\n5. Try different Wine versions\n6. Check system libraries\n7. Verify Wine configuration\n8. Recreate Wine prefix if needed" 15 70
+}
+
+# Debug tools
+debug_tools() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🔍 Debug Tools" \
+                          --menu "\nSelect debug tool:" \
+                          15 60 5 \
+                          "1" "📊 System Monitor" \
+                          "2" "🔍 Process Viewer" \
+                          "3" "📋 Log Viewer" \
+                          "4" "🌐 Network Tools" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) system_monitor ;;
+        2) process_viewer ;;
+        3) log_viewer ;;
+        4) network_tools ;;
+        5) return ;;
+    esac
+}
+
+# System monitor
+system_monitor() {
+    if command -v htop &>/dev/null; then
+        clear
+        htop
+    else
+        dialog --msgbox "htop not installed. Install with: emerge sys-process/htop" 8 60
+    fi
+}
+
+# Process viewer
+process_viewer() {
+    if command -v ps &>/dev/null; then
+        clear
+        ps aux | head -20
+        echo ""
+        read -p "Press Enter to continue..."
+    else
+        dialog --msgbox "ps command not available" 8 40
+    fi
+}
+
+# Log viewer
+log_viewer() {
+    if command -v journalctl &>/dev/null; then
+        clear
+        journalctl --no-pager -n 50
+        read -p "Press Enter to continue..."
+    else
+        dialog --msgbox "journalctl not available" 8 40
+    fi
+}
+
+# Network tools
+network_tools() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "🌐 Network Tools" \
+                          --menu "\nSelect network tool:" \
+                          15 60 5 \
+                          "1" "📡 Network Status" \
+                          "2" "🔍 Port Scanner" \
+                          "3" "📊 Bandwidth Monitor" \
+                          "4" "🌊 Connection Test" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) network_status ;;
+        2) port_scanner ;;
+        3) bandwidth_monitor ;;
+        4) connection_test ;;
+        5) return ;;
+    esac
+}
+
+# Network status
+network_status() {
+    clear
+    echo "Network Status:"
+    echo "==============="
+    ip addr show
+    echo ""
+    echo "Routing Table:"
+    echo "=============="
+    ip route show
+    read -p "Press Enter to continue..."
+}
+
+# Port scanner
+port_scanner() {
+    if command -v nmap &>/dev/null; then
+        local target=$(dialog --inputbox "Enter target IP or hostname:" 8 60 "localhost" 3>&1 1>&2 2>&3)
+        if [ $? -eq 0 ] && [ ! -z "$target" ]; then
+            clear
+            echo "Scanning $target..."
+            nmap -sT "$target"
+            read -p "Press Enter to continue..."
+        fi
+    else
+        dialog --msgbox "nmap not installed. Install with: emerge net-analyzer/nmap" 8 60
+    fi
+}
+
+# Bandwidth monitor
+bandwidth_monitor() {
+    if command -v nethogs &>/dev/null; then
+        clear
+        echo "Monitoring network usage..."
+        nethogs
+    else
+        dialog --msgbox "nethogs not installed. Install with: emerge net-analyzer/nethogs" 8 60
+    fi
+}
+
+# Connection test
+connection_test() {
+    local target=$(dialog --inputbox "Enter target to test:" 8 60 "8.8.8.8" 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ] && [ ! -z "$target" ]; then
+        clear
+        echo "Testing connection to $target..."
+        ping -c 4 "$target"
+        echo ""
+        traceroute "$target" 2>/dev/null || echo "traceroute not available"
+        read -p "Press Enter to continue..."
+    fi
+}
+
+# View logs
+view_logs() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "📋 Logs" \
+                          --menu "\nSelect log type:" \
+                          15 60 5 \
+                          "1" "📊 System Logs" \
+                          "2" "🎮 Game Logs" \
+                          "3" "🍷 Wine Logs" \
+                          "4" "🌐 Network Logs" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) system_logs ;;
+        2) game_logs ;;
+        3) wine_logs ;;
+        4) network_logs ;;
+        5) return ;;
+    esac
+}
+
+# System logs
+system_logs() {
+    if command -v journalctl &>/dev/null; then
+        clear
+        echo "Recent system logs:"
+        journalctl --no-pager -n 100
+        read -p "Press Enter to continue..."
+    else
+        dialog --msgbox "journalctl not available" 8 40
+    fi
+}
+
+# Game logs
+game_logs() {
+    local log_paths=(
+        "$HOME/.steam/steam/logs"
+        "$HOME/.local/share/Steam/logs"
+        "$HOME/.wine/drive_c/Program Files/Steam/logs"
+    )
+    
+    local found_logs=""
+    for path in "${log_paths[@]}"; do
+        if [ -d "$path" ]; then
+            found_logs+="• $path\n"
+        fi
+    done
+    
+    if [ -z "$found_logs" ]; then
+        dialog --msgbox "No game logs found" 8 40
+    else
+        dialog --msgbox "Game Log Locations:\n\n$found_logs" 12 60
+    fi
+}
+
+# Wine logs
+wine_logs() {
+    local wine_logs=$(find ~/.wine* -name "*.log" 2>/dev/null | head -10)
+    if [ -z "$wine_logs" ]; then
+        dialog --msgbox "No Wine logs found" 8 40
+    else
+        local log_list=""
+        for log in $wine_logs; do
+            log_list+="• $log\n"
+        done
+        
+        dialog --msgbox "Wine Logs Found:\n\n$log_list" 15 60
+    fi
+}
+
+# Network logs
+network_logs() {
+    if command -v journalctl &>/dev/null; then
+        clear
+        echo "Network-related logs:"
+        journalctl --no-pager -u NetworkManager -n 50
+        echo ""
+        echo "Firewall logs:"
+        journalctl --no-pager -u firewalld -n 50 2>/dev/null || echo "firewalld not running"
+        read -p "Press Enter to continue..."
+    else
+        dialog --msgbox "journalctl not available" 8 40
+    fi
+}
+
+# Get help
+get_help() {
+    dialog --msgbox "Getting Help:\n\n• RaptorOS Documentation: /usr/share/doc/raptoros\n• Community Forums: https://forums.raptoros.com\n• Discord Server: https://discord.gg/raptoros\n• GitHub Issues: https://github.com/raptoros/raptoros\n• Wiki: https://wiki.raptoros.com\n\nFor immediate help, run: raptoros-help" 15 70
+}
+
+# Documentation
+documentation() {
+    local choice=$(dialog --backtitle "RaptorOS Welcome" \
+                          --title "📚 Documentation" \
+                          --menu "\nSelect documentation:" \
+                          15 60 5 \
+                          "1" "📖 User Guide" \
+                          "2" "🔧 System Admin" \
+                          "3" "🎮 Gaming Guide" \
+                          "4" "🛠️  Troubleshooting" \
+                          "5" "Back" \
+                          3>&1 1>&2 2>&3)
+    
+    case $choice in
+        1) user_guide ;;
+        2) system_admin ;;
+        3) gaming_guide ;;
+        4) troubleshooting_guide ;;
+        5) return ;;
+    esac
+}
+
+# User guide
+user_guide() {
+    dialog --msgbox "User Guide:\n\n• Getting Started: /usr/share/doc/raptoros/getting-started\n• Basic Usage: /usr/share/doc/raptoros/basic-usage\n• Desktop Customization: /usr/share/doc/raptoros/customization\n• Software Management: /usr/share/doc/raptoros/software\n\nOpen these files with: xdg-open /path/to/file" 15 70
+}
+
+# System admin
+system_admin() {
+    dialog --msgbox "System Administration:\n\n• System Configuration: /usr/share/doc/raptoros/admin\n• Network Setup: /usr/share/doc/raptoros/network\n• Security: /usr/share/doc/raptoros/security\n• Performance Tuning: /usr/share/doc/raptoros/performance\n\nRun: raptoros-admin for admin tools" 15 70
+}
+
+# Gaming guide
+gaming_guide() {
+    dialog --msgbox "Gaming Guide:\n\n• Game Installation: /usr/share/doc/raptoros/gaming\n• Wine Setup: /usr/share/doc/raptoros/wine\n• Performance Optimization: /usr/share/doc/raptoros/optimization\n• Troubleshooting: /usr/share/doc/raptoros/troubleshooting\n\nRun: raptoros-gaming for gaming tools" 15 70
+}
+
+# Troubleshooting guide
+troubleshooting_guide() {
+    dialog --msgbox "Troubleshooting Guide:\n\n• Common Issues: /usr/share/doc/raptoros/issues\n• Debug Tools: /usr/share/doc/raptoros/debug\n• Log Analysis: /usr/share/doc/raptoros/logs\n• Recovery: /usr/share/doc/raptoros/recovery\n\nRun: raptoros-diagnose for diagnostics" 15 70
+}
+
+# Run System Update - Execute raptoros-update.sh
+run_system_update() {
+    dialog --yesno "Run RaptorOS system update?\n\nThis will:\n• Update system packages\n• Update gaming components\n• Optimize performance\n• Check system health\n\nThis may take some time." 12 60
+    
+    if [ $? -eq 0 ]; then
+        if [ -f /usr/local/bin/raptoros-update ]; then
+            clear
+            echo "Running RaptorOS system update..."
+            echo "=================================="
+            raptoros-update
+            read -p "Press Enter to continue..."
+        else
+            dialog --msgbox "RaptorOS update tool not found.\n\nInstall it first or run:\nemerge --sync && emerge -avuDN @world" 10 60
+        fi
+    fi
+}
+
+# Game library setup
+setup_game_libraries() {
+    dialog --backtitle "RaptorOS Welcome" \
+           --title "Game Library Setup" \
+           --msgbox "\nLet's set up your game libraries.\n\n\
+This wizard will help you:\n\
+• Configure Steam library folders\n\
+• Set up Lutris game directories\n\
+• Mount existing Windows game drives\n\
+• Configure Wine prefixes\n\
+• Set up shader cache locations" 14 60
+    
+    # Check for existing libraries
+    local found_libraries=""
+    
+    # Check for Steam libraries
+    if [ -d "$HOME/.steam/steam/steamapps" ]; then
+        found_libraries+="✓ Steam library found\n"
+    fi
+    
+    # Check for Lutris
+    if [ -d "$HOME/Games" ]; then
+        found_libraries+="✓ Games folder found\n"
+    fi
+    
+    # Check for mounted NTFS drives
+    for mount in $(mount | grep -E "ntfs|fuseblk" | cut -d' ' -f3); do
+        if [ -d "$mount/SteamLibrary" ] || [ -d "$mount/Program Files/Steam" ]; then
+            found_libraries+="✓ Windows Steam library at $mount\n"
+        fi
+    done
+    
+    if [ ! -z "$found_libraries" ]; then
+        dialog --msgbox "Found existing libraries:\n\n$found_libraries" 12 60
+    fi
+    
+    # Library configuration options
+    local lib_choice=$(dialog --backtitle "RaptorOS Welcome" \
+                              --title "Library Configuration" \
+                              --menu "\nSelect action:" \
+                              15 60 6 \
+                              "1" "Add Steam library folder" \
+                              "2" "Configure Lutris paths" \
+                              "3" "Mount Windows game drive" \
+                              "4" "Create Wine prefix" \
+                              "5" "Configure shader cache" \
+                              "6" "Done" \
+                              3>&1 1>&2 2>&3)
+    
+    case $lib_choice in
+        1)
+            local steam_path=$(dialog --inputbox "Enter Steam library path:" 8 60 "/games/steam" 3>&1 1>&2 2>&3)
+            mkdir -p "$steam_path"
+            echo "Steam library added: $steam_path"
+            ;;
+        2)
+            local lutris_path=$(dialog --inputbox "Enter Lutris games path:" 8 60 "$HOME/Games" 3>&1 1>&2 2>&3)
+            mkdir -p "$lutris_path"
+            ;;
+        3)
+            # Mount Windows drives
+            setup_windows_drives
+            ;;
+    esac
+}
+
+# Mount Windows game drives
+setup_windows_drives() {
+    local windows_parts=$(lsblk -f | grep -E "ntfs|NTFS" | awk '{print $1}')
+    
+    if [ -z "$windows_parts" ]; then
+        dialog --msgbox "No NTFS partitions found" 8 40
+        return
+    fi
+    
+    # Create mount points
+    for part in $windows_parts; do
+        local mount_point="/mnt/games_$part"
+        mkdir -p "$mount_point"
+        
+        # Add to fstab
+        local uuid=$(blkid -s UUID -o value /dev/$part)
+        echo "UUID=$uuid $mount_point ntfs-3g defaults,uid=1000,gid=1000,umask=000 0 0" >> /etc/fstab
+        
+        mount "$mount_point"
+    done
+    
+    dialog --msgbox "Windows drives mounted successfully" 8 50
+}
+
+# Performance tips display
+show_performance_tips() {
+    dialog --backtitle "RaptorOS Welcome" \
+           --title "🎮 Gaming Performance Tips" \
+           --msgbox "\n\
+RaptorOS Performance Tips:\n\
+════════════════════════════\n\n\
+1. LAUNCH OPTIONS:\n\
+   Add to Steam games: gamemoderun %command%\n\
+   For Proton: PROTON_ENABLE_NVAPI=1 %command%\n\n\
+2. SHADER CACHE:\n\
+   Keep shader cache on SSD for faster loading\n\
+   Use: DXVK_STATE_CACHE_PATH=/games/.cache\n\n\
+3. CPU OPTIMIZATION:\n\
+   For Intel 12th gen+: Use only P-cores for games\n\
+   taskset -c 0-15 game_executable\n\n\
+4. MONITORING:\n\
+   Toggle MangoHud: Shift+F12\n\
+   Toggle GameMode: Super+G\n\n\
+5. NETWORK:\n\
+   For online games: sudo sysctl -w net.ipv4.tcp_fastopen=3\n\n\
+Press OK for more tips..." 24 70
+    
+    dialog --backtitle "RaptorOS Welcome" \
+           --title "🎮 Advanced Tips" \
+           --msgbox "\n\
+Advanced Optimization:\n\
+════════════════════════\n\n\
+• NVIDIA GPU:\n\
+  Force maximum performance:\n\
+  nvidia-smi -pm 1 && nvidia-smi -pl 350\n\n\
+• AMD GPU:\n\
+  Use CoreCtrl or LACT for overclocking\n\n\
+• DISABLE COMPOSITING:\n\
+  For fullscreen games, compositor auto-disables\n\
+  Manual: Alt+Shift+F12 (KDE)\n\n\
+• WINE/PROTON:\n\
+  Use fsync for better performance:\n\
+  WINEFSYNC=1 wine game.exe\n\n\
+• MEMORY:\n\
+  Clear caches before gaming:\n\
+  sync && echo 3 > /proc/sys/vm/drop_caches\n\n\
+• STORAGE:\n\
+  Keep games on NVMe, saves on HDD\n\
+  Use BTRFS compression for non-game files" 24 70
+}
+
+# System information display
+show_system_info() {
+    local cpu_model=$(lscpu | grep "Model name" | cut -d: -f2 | xargs)
+    local cpu_cores=$(nproc)
+    local ram_total=$(free -h | awk '/^Mem:/{print $2}')
+    local gpu_model=$(lspci | grep VGA | cut -d: -f3 | xargs)
+    local kernel=$(uname -r)
+    local mesa_version=$(glxinfo 2>/dev/null | grep "OpenGL version" | cut -d: -f2 | xargs)
+    local vulkan_version=$(vulkaninfo 2>/dev/null | grep "Vulkan Instance" | head -1 | cut -d' ' -f4)
+    
+    dialog --backtitle "RaptorOS Welcome" \
+           --title "System Information" \
+           --msgbox "\n\
+╔════════════════════════════════════╗\n\
+║     RaptorOS System Information    ║\n\
+╚════════════════════════════════════╝\n\n\
+CPU: $cpu_model\n\
+Cores/Threads: $cpu_cores\n\
+RAM: $ram_total\n\
+GPU: $gpu_model\n\
+Kernel: $kernel\n\
+OpenGL: $mesa_version\n\
+Vulkan: $vulkan_version\n\n\
+Performance Rating: $(get_system_rating)\n\n\
+For detailed benchmarks run:\n\
+raptoros-benchmark" 20 70
+}
+
+# Get system performance rating
+get_system_rating() {
+    local cpu_score=0
+    local gpu_score=0
+    
+    # Simple CPU rating based on model
+    if lscpu | grep -q "i9\|Ryzen 9"; then
+        cpu_score=100
+    elif lscpu | grep -q "i7\|Ryzen 7"; then
+        cpu_score=80
+    elif lscpu | grep -q "i5\|Ryzen 5"; then
+        cpu_score=60
+    else
+        cpu_score=40
+    fi
+    
+    # GPU rating
+    if lspci | grep -qi "RTX 40[89]0\|RX 7900"; then
+        gpu_score=100
+    elif lspci | grep -qi "RTX 40[67]0\|RX 7[78]00"; then
+        gpu_score=80
+    elif lspci | grep -qi "RTX 30[789]0\|RX 6[89]00"; then
+        gpu_score=60
+    else
+        gpu_score=40
+    fi
+    
+    local total_score=$(( (cpu_score + gpu_score) / 2 ))
+    
+    if [ $total_score -ge 90 ]; then
+        echo "🦖 APEX PREDATOR"
+    elif [ $total_score -ge 70 ]; then
+        echo "🦅 HUNTING RAPTOR"
+    elif [ $total_score -ge 50 ]; then
+        echo "🦎 SWIFT HUNTER"
+    else
+        echo "🥚 EMERGING POWER"
+    fi
+}
+
+# Main menu
+main_menu() {
+    while true; do
+        local choice=$(dialog --colors --backtitle "RaptorOS Welcome" \
+                             --title "\Zb\Z2RaptorOS Welcome Center\Zn" \
+                             --menu "\nWhat would you like to do?" \
+                             20 65 12 \
+                             "1" "📊 System Status" \
+                             "2" "🛍️  Software Center" \
+                             "3" "⚡ Performance Tuning" \
+                             "4" "🎮 Game Compatibility" \
+                             "5" "🔄 System Update" \
+                             "6" "📚 Setup Game Libraries" \
+                             "7" "💡 Performance Tips" \
+                             "8" "ℹ️  System Information" \
+                             "9" "🎨 Customize Desktop" \
+                             "10" "🔧 Hardware Settings" \
+                             "11" "📊 Run Benchmark" \
+                             "12" "Exit Welcome Center" \
+                             3>&1 1>&2 2>&3)
+        
+        case $choice in
+            1) show_system_status ;;
+            2) software_center ;;
+            3) performance_tuning ;;
+            4) game_compatibility ;;
+            5) run_system_update ;;
+            6) setup_game_libraries ;;
+            7) show_performance_tips ;;
+            8) show_system_info ;;
+            9) customize_desktop ;;
+            10) hardware_settings ;;
+            11) run_benchmark ;;
+            12|"") break ;;
+        esac
+    done
+}
+
+# Desktop customization
+customize_desktop() {
+    dialog --backtitle "RaptorOS Welcome" \
+           --title "Desktop Customization" \
+           --msgbox "Desktop customization options:\n\n\
+• Themes: Tokyo Night, Catppuccin, Dracula\n\
+• Icons: Papirus, Fluent, Tela\n\
+• Wallpapers: Dynamic, Gaming, Abstract\n\
+• Effects: Blur, Transparency, Animations\n\n\
+Run 'raptoros-rice' for the theme manager" 14 60
+}
+
+# Hardware settings
+hardware_settings() {
+    local hw_choice=$(dialog --backtitle "RaptorOS Welcome" \
+                            --title "Hardware Settings" \
+                            --menu "\nSelect hardware to configure:" \
+                            14 60 6 \
+                            "1" "RGB Lighting Control" \
+                            "2" "Fan Curves" \
+                            "3" "Overclocking" \
+                            "4" "Power Management" \
+                            "5" "Peripheral Settings" \
+                            "6" "Back" \
+                            3>&1 1>&2 2>&3)
+    
+    case $hw_choice in
+        1) 
+            dialog --msgbox "RGB Control:\n\nOpenRGB installed for universal RGB control\nRun: openrgb" 10 50
+            ;;
+        2)
+            dialog --msgbox "Fan Control:\n\nUse 'fancontrol' for custom curves\nGUI: 'corectrl' for GPU fans" 10 50
+            ;;
+        3)
+            dialog --msgbox "Overclocking:\n\nCPU: Use 'corectrl' or BIOS\nGPU: 'nvidia-settings' or 'corectrl'" 10 50
+            ;;
+    esac
+}
+
+# Run benchmark
+run_benchmark() {
+    dialog --backtitle "RaptorOS Welcome" \
+           --title "System Benchmark" \
+           --yesno "Run comprehensive system benchmark?\n\n\
+This will test:\n\
+• CPU performance\n\
+• GPU performance\n\
+• Memory bandwidth\n\
+• Storage speed\n\n\
+This may take 5-10 minutes." 14 50
+    
+    if [ $? -eq 0 ]; then
+        if [ -f /usr/local/bin/raptoros-benchmark ]; then
+            /usr/local/bin/raptoros-benchmark
+        else
+            dialog --msgbox "Benchmark tool not installed.\nRun: emerge app-benchmarks/stress-ng" 8 50
+        fi
+    fi
+}
+
+# Configure gaming network
+configure_network_gaming() {
+    dialog --msgbox "Network optimization for gaming:\n\n\
+Current settings:\n\
+• TCP Congestion: $(sysctl net.ipv4.tcp_congestion_control | cut -d= -f2)\n\
+• Queue Discipline: $(tc qdisc show | head -1)\n\n\
+To optimize:\n\
+gaming-firewall start\n\
+raptoros-network optimize" 14 60
+}
+
+# Auto-start configuration
+configure_autostart() {
+    dialog --yesno "Would you like RaptorOS Welcome to start on login?\n\n\
+You can always run it manually with: raptoros-welcome" 10 60
+    
+    if [ $? -eq 0 ]; then
+        # Create desktop entry
+        cat > ~/.config/autostart/raptoros-welcome.desktop << EOF
+[Desktop Entry]
+Type=Application
+Name=RaptorOS Welcome
+Exec=/usr/local/bin/raptoros-welcome
+Icon=raptoros
+Comment=RaptorOS Welcome Center
+X-GNOME-Autostart-enabled=true
+EOF
+        dialog --msgbox "Welcome Center will start on login" 8 50
+    fi
+}
+
+# Main execution
+main() {
+    # Check if first run
+    if [ ! -f ~/.config/raptoros/welcome-shown ]; then
+        show_welcome_screen
+        mkdir -p ~/.config/raptoros
+        touch ~/.config/raptoros/welcome-shown
+        configure_autostart
+    fi
+    
+    # Check system status
+    local opt_score=$(check_system_status)
+    
+    # Show main menu
+    main_menu
+    
+    # Exit message
+    clear
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${NC}              ${BOLD}${GREEN}Thank you for using RaptorOS!${NC}                  ${CYAN}║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${GREEN}Performance Evolved™${NC}"
+    echo ""
+    echo "Quick commands:"
+    echo "  • raptoros-welcome   - Open this welcome center"
+    echo "  • raptoros-benchmark - Run system benchmark"
+    echo "  • gaming-firewall    - Configure firewall"
+    echo "  • gamemode-toggle    - Toggle gaming mode"
+    echo ""
+}
+
+# Run if not sourced
+if [ "${BASH_SOURCE[0]}" == "${0}" ]; then
+    main "$@"
+fi

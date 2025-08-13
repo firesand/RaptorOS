@@ -1,0 +1,1010 @@
+#!/bin/bash
+# Gentoo Gaming ISO Builder
+# Optimized for Intel i9-14900K + RTX 4090
+# Build a custom Gentoo ISO with gaming optimizations
+
+set -e
+
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR="/var/tmp/gentoo-gaming-build"
+ISO_OUTPUT="gentoo-gaming-$(date +%Y%m%d).iso"
+STAGE3_URL="https://distfiles.gentoo.org/releases/amd64/autobuilds/latest-stage3-amd64-openrc.txt"
+JOBS=48
+LOAD=48
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+NC='\033[0m'
+
+# Source modules
+source "$SCRIPT_DIR/lib/colors.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/lib/functions.sh" 2>/dev/null || true
+
+# Banner
+show_banner() {
+    clear
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║           Gentoo Gaming ISO Builder v1.0                  ║${NC}"
+    echo -e "${CYAN}║         Optimized for i9-14900K + RTX 4090               ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+# Check requirements
+check_requirements() {
+    echo -e "${CYAN}Checking build requirements...${NC}"
+    
+    local required_tools="wget git squashfs-tools xorriso parted dosfstools btrfs-progs dialog"
+    local missing_tools=""
+    
+    for tool in $required_tools; do
+        if ! command -v $tool &> /dev/null; then
+            missing_tools="$missing_tools $tool"
+        fi
+    done
+    
+    if [ ! -z "$missing_tools" ]; then
+        echo -e "${RED}Missing required tools:${NC}$missing_tools"
+        echo -e "${YELLOW}Install with: sudo pacman -S$missing_tools${NC}"
+        exit 1
+    fi
+    
+    # Check disk space
+    local available_space=$(df /var/tmp | awk 'NR==2 {print int($4/1048576)}')
+    if [ $available_space -lt 50 ]; then
+        echo -e "${RED}Insufficient disk space. Need at least 50GB free in /var/tmp${NC}"
+        echo -e "${RED}Available: ${available_space}GB${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓ All requirements met${NC}"
+}
+
+# Detect hardware
+detect_hardware() {
+    echo -e "${CYAN}Detecting hardware...${NC}"
+    
+    CPU_MODEL=$(lscpu | grep "Model name" | cut -d: -f2 | xargs)
+    CPU_CORES=$(nproc)
+    TOTAL_RAM=$(free -g | awk '/^Mem:/{print $2}')
+    
+    if command -v nvidia-smi &> /dev/null; then
+        GPU_MODEL=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo "Unknown")
+    else
+        GPU_MODEL=$(lspci | grep VGA | cut -d: -f3 | xargs)
+    fi
+    
+    echo -e "${GREEN}CPU: $CPU_MODEL (${CPU_CORES} threads)${NC}"
+    echo -e "${GREEN}RAM: ${TOTAL_RAM}GB${NC}"
+    echo -e "${GREEN}GPU: $GPU_MODEL${NC}"
+    echo ""
+}
+
+# Build menu
+show_build_menu() {
+    echo -e "${CYAN}Select build type:${NC}"
+    echo "1) Quick Build (1-2 hours) - Uses binary packages where possible"
+    echo "2) Optimized Build (3-4 hours) - Compiles critical packages"
+    echo "3) Full Build (6-8 hours) - Compiles everything from source"
+    echo "4) ISO Only - Use existing build directory"
+    echo "5) Clean Build Directory"
+    echo "6) Recovery Mode - Fix broken installation"
+    echo ""
+    read -p "Select [1-5]: " BUILD_TYPE
+    
+    case $BUILD_TYPE in
+        1) build_quick ;;
+        2) build_optimized ;;
+        3) build_full ;;
+        4) create_iso_only ;;
+        5) clean_build ;;
+        6) recovery_mode ;;
+        *) echo -e "${RED}Invalid option${NC}"; exit 1 ;;
+    esac
+}
+
+# Setup build environment
+setup_build_env() {
+    echo -e "${CYAN}Setting up build environment...${NC}"
+    
+    # Create directories
+    mkdir -p "$BUILD_DIR"/{squashfs,iso,work}
+    cd "$BUILD_DIR"
+    
+    # Download stage3 if needed
+    if [ ! -f "stage3-*.tar.xz" ]; then
+        echo -e "${CYAN}Downloading stage3...${NC}"
+        LATEST=$(wget -qO- $STAGE3_URL | tail -1 | cut -d' ' -f1)
+        
+        if [ -z "$LATEST" ]; then
+            echo -e "${RED}Error: Could not determine latest stage3 version${NC}"
+            exit 1
+        fi
+        
+        echo -e "${YELLOW}Downloading: $LATEST${NC}"
+        if ! wget -c "https://distfiles.gentoo.org/releases/amd64/autobuilds/$LATEST"; then
+            echo -e "${RED}Error: Failed to download stage3 tarball${NC}"
+            exit 1
+        fi
+    fi
+    
+    # Extract stage3
+    if [ ! -d "squashfs/etc" ]; then
+        echo -e "${CYAN}Extracting stage3...${NC}"
+        
+        # Check if stage3 file exists
+        local stage3_file=$(find . -name "stage3-*.tar.xz" 2>/dev/null | head -1)
+        if [ -z "$stage3_file" ]; then
+            echo -e "${RED}Error: No stage3 file found! Cannot continue.${NC}"
+            exit 1
+        fi
+        
+        echo -e "${YELLOW}Extracting: $stage3_file${NC}"
+        cd squashfs
+        if ! sudo tar xpf "../$stage3_file" --xattrs-include='*.*' --numeric-owner; then
+            echo -e "${RED}Error: Failed to extract stage3 tarball${NC}"
+            cd ..
+            exit 1
+        fi
+        cd ..
+        echo -e "${GREEN}✓ Stage3 extracted successfully${NC}"
+    fi
+    
+    # Copy configurations
+    echo -e "${CYAN}Copying configurations...${NC}"
+    sudo cp -r "$SCRIPT_DIR/configs/"* squashfs/etc/portage/ 2>/dev/null || true
+    sudo cp "$SCRIPT_DIR/installer/"* squashfs/usr/local/bin/ 2>/dev/null || true
+    sudo chmod +x squashfs/usr/local/bin/* 2>/dev/null || true
+}
+
+# Configure make.conf
+configure_portage() {
+    echo -e "${CYAN}Configuring Portage using base config...${NC}"
+    
+    # Ensure configs directory exists
+    if [ ! -f "$SCRIPT_DIR/configs/make.conf" ]; then
+        echo -e "${RED}Error: Base make.conf not found at $SCRIPT_DIR/configs/make.conf${NC}"
+        echo -e "${YELLOW}Please ensure the RaptorOS configs are properly set up${NC}"
+        exit 1
+    fi
+    
+    # Copy the master make.conf
+    sudo cp "$SCRIPT_DIR/configs/make.conf" "squashfs/etc/portage/make.conf"
+    
+    # Copy RaptorOS configuration files
+    sudo mkdir -p "squashfs/etc/portage/env"
+    sudo mkdir -p "squashfs/etc/portage/package.env"
+    sudo mkdir -p "squashfs/etc/portage/package.accept_keywords"
+    
+    sudo cp -r "$SCRIPT_DIR/configs/env/"* "squashfs/etc/portage/env/" 2>/dev/null || true
+    sudo cp -r "$SCRIPT_DIR/configs/package.env/"* "squashfs/etc/portage/package.env/" 2>/dev/null || true
+    sudo cp -r "$SCRIPT_DIR/configs/package.accept_keywords/"* "squashfs/etc/portage/package.accept_keywords/" 2>/dev/null || true
+    
+    # Now, append build-specific flags if needed
+    sudo tee -a squashfs/etc/portage/make.conf > /dev/null << EOF
+
+# --- Build-Specific Overrides ---
+# Generated: $(date)
+MAKEOPTS="-j${JOBS} -l${LOAD}"
+EMERGE_DEFAULT_OPTS="--jobs=${JOBS} --load-average=${LOAD}"
+EOF
+    
+    echo -e "${GREEN}✓ Portage configured with RaptorOS base config + build overrides${NC}"
+}
+
+# Setup chroot
+setup_chroot() {
+    echo -e "${CYAN}Setting up chroot environment...${NC}"
+    
+    # Mount necessities
+    sudo mount -t proc /proc squashfs/proc
+    sudo mount --rbind /sys squashfs/sys
+    sudo mount --rbind /dev squashfs/dev
+    sudo mount --bind /run squashfs/run
+    
+    # Copy resolv.conf
+    sudo cp -L /etc/resolv.conf squashfs/etc/
+}
+
+# Cleanup chroot
+cleanup_chroot() {
+    echo -e "${CYAN}Cleaning up chroot...${NC}"
+    
+    sudo umount -l squashfs/proc 2>/dev/null || true
+    sudo umount -l squashfs/sys 2>/dev/null || true
+    sudo umount -l squashfs/dev 2>/dev/null || true
+    sudo umount -l squashfs/run 2>/dev/null || true
+}
+
+# Quick build using binaries
+build_quick() {
+    echo -e "${CYAN}Starting quick build (binary packages)...${NC}"
+    
+    setup_build_env
+    configure_portage
+    setup_chroot
+    
+    # Add binary host
+    sudo tee -a squashfs/etc/portage/make.conf > /dev/null << 'EOF'
+
+# Binary packages for quick build
+FEATURES="${FEATURES} getbinpkg"
+EMERGE_DEFAULT_OPTS="${EMERGE_DEFAULT_OPTS} --getbinpkg"
+PORTAGE_BINHOST="https://gentoo.osuosl.org/experimental/amd64/binpkg/default/linux/17.1/x86-64/"
+EOF
+    
+    # Install packages in chroot
+    sudo chroot squashfs /bin/bash << 'CHROOTCMD'
+#!/bin/bash
+source /etc/profile
+
+# Sync portage
+emerge-webrsync
+emerge --sync --quiet
+
+# Install essential packages
+emerge --quiet --getbinpkg -av \
+    sys-kernel/gentoo-kernel-bin \
+    sys-kernel/linux-firmware \
+    sys-boot/grub \
+    sys-boot/efibootmgr \
+    sys-apps/pciutils \
+    sys-apps/usbutils \
+    net-misc/networkmanager \
+    net-misc/dhcpcd \
+    app-admin/sudo \
+    app-editors/neovim \
+    app-misc/dialog \
+    app-portage/gentoolkit \
+    app-portage/cpuid2cpuflags \
+    sys-fs/btrfs-progs \
+    sys-fs/dosfstools \
+    sys-fs/ntfs3g \
+    sys-block/zram-init
+
+# Install GPU drivers
+emerge --quiet --getbinpkg -av x11-drivers/nvidia-drivers
+
+# Install gaming essentials
+emerge --quiet --getbinpkg -av \
+    games-util/steam-launcher \
+    games-util/lutris \
+    games-util/gamemode \
+    games-util/mangohud \
+    app-emulation/wine-staging
+
+# Install desktop (user choice)
+# This will be handled by installer
+CHROOTCMD
+    
+    cleanup_chroot
+    
+    # Create backup before final steps
+    create_backup
+    
+    create_installer
+    create_iso
+}
+
+# Optimized build
+build_optimized() {
+    echo -e "${CYAN}Starting optimized build...${NC}"
+    
+    setup_build_env
+    configure_portage
+    setup_chroot
+    
+    # Build critical packages from source
+    sudo chroot squashfs /bin/bash << 'CHROOTCMD'
+#!/bin/bash
+source /etc/profile
+
+# Sync portage
+emerge-webrsync
+emerge --sync --quiet
+
+# Update system
+emerge --quiet --update --deep --newuse @world
+
+# Build kernel from source
+emerge -av sys-kernel/gentoo-sources
+cd /usr/src/linux
+make defconfig
+make -j48
+make modules_install
+make install
+
+# Build rest with mix of binary and source
+emerge -av \
+    sys-kernel/linux-firmware \
+    sys-boot/grub \
+    sys-apps/systemd \
+    x11-drivers/nvidia-drivers \
+    games-util/steam-launcher \
+    games-util/lutris \
+    games-util/gamemode \
+    app-emulation/wine-staging
+CHROOTCMD
+    
+    cleanup_chroot
+    
+    # Create backup before final steps
+    create_backup
+    
+    create_installer
+    create_iso
+}
+
+# Full build from source
+build_full() {
+    echo -e "${CYAN}Starting full build (everything from source)...${NC}"
+    echo -e "${YELLOW}This will take 6-8 hours!${NC}"
+    
+    setup_build_env
+    configure_portage
+    setup_chroot
+    
+    # Build everything from source
+    sudo chroot squashfs /bin/bash << 'CHROOTCMD'
+#!/bin/bash
+source /etc/profile
+
+# Sync portage
+emerge-webrsync
+emerge --sync
+
+# Full system update
+emerge --emptytree --update --deep --newuse @world
+
+# Install all packages
+emerge -av \
+    sys-kernel/gentoo-sources \
+    sys-kernel/linux-firmware \
+    sys-boot/grub \
+    x11-drivers/nvidia-drivers \
+    kde-plasma/plasma-meta \
+    games-util/steam-launcher \
+    games-util/lutris \
+    games-util/gamemode \
+    app-emulation/wine-staging
+CHROOTCMD
+    
+    cleanup_chroot
+    
+    # Create backup before final steps
+    create_backup
+    
+    create_installer
+    create_iso
+}
+
+# Create installer
+create_installer() {
+    echo -e "${CYAN}Creating TUI installer...${NC}"
+    
+    # Copy installer files
+    sudo cp -r "$SCRIPT_DIR/installer/"* squashfs/usr/local/bin/
+    sudo chmod +x squashfs/usr/local/bin/install_gentoo
+    
+    # Create installer data
+    sudo mkdir -p squashfs/usr/share/gentoo-installer
+    sudo cp -r "$SCRIPT_DIR/installer/modules/"* squashfs/usr/share/gentoo-installer/
+    
+    # Create welcome message
+    sudo tee squashfs/etc/motd > /dev/null << 'EOF'
+╔══════════════════════════════════════════════════════════╗
+║          Welcome to Gentoo Gaming Live System             ║
+║         Optimized for Intel i9-14900K + RTX 4090          ║
+║                                                            ║
+║  Type 'install_gentoo' to start the installation          ║
+║                                                            ║
+║  Default credentials: gentoo/gentoo                       ║
+╚══════════════════════════════════════════════════════════╝
+EOF
+}
+
+# Create ISO
+create_iso() {
+    echo -e "${CYAN}Creating ISO image...${NC}"
+    
+    cd "$BUILD_DIR"
+    
+    # Create squashfs
+    echo -e "${CYAN}Creating compressed filesystem...${NC}"
+    sudo mksquashfs squashfs iso/gentoo.squashfs \
+        -comp xz -b 1M -Xdict-size 100% \
+        -exclude boot/lost+found \
+        -exclude var/tmp/portage \
+        -exclude var/cache/distfiles
+    
+    # Setup bootloader
+    mkdir -p iso/{boot,EFI/BOOT}
+    
+    # Copy kernel
+    sudo cp squashfs/boot/vmlinuz* iso/boot/vmlinuz 2>/dev/null || \
+        sudo cp squashfs/boot/kernel* iso/boot/vmlinuz 2>/dev/null
+    
+    # Create basic initramfs if needed
+    if [ ! -f squashfs/boot/initramfs* ]; then
+        echo -e "${YELLOW}Creating minimal initramfs...${NC}"
+        # This is simplified - real initramfs would need more setup
+        (cd squashfs && sudo find . | sudo cpio -o -H newc | gzip > ../iso/boot/initramfs)
+    else
+        sudo cp squashfs/boot/initramfs* iso/boot/initramfs
+    fi
+    
+    # Create GRUB config
+    cat > iso/boot/grub.cfg << 'GRUBCFG'
+set timeout=10
+set default=0
+
+menuentry "Gentoo Gaming Live (Install)" {
+    linux /boot/vmlinuz root=/dev/ram0 init=/init quiet splash
+    initrd /boot/initramfs
+}
+
+menuentry "Gentoo Gaming Live (Safe Mode)" {
+    linux /boot/vmlinuz root=/dev/ram0 init=/init single
+    initrd /boot/initramfs
+}
+GRUBCFG
+    
+    # Create ISO
+    echo -e "${CYAN}Building ISO image...${NC}"
+    xorriso -as mkisofs \
+        -o "$SCRIPT_DIR/$ISO_OUTPUT" \
+        -V "GENTOO_GAMING" \
+        -J -R -l \
+        -b boot/grub/stage2_eltorito \
+        -no-emul-boot \
+        -boot-load-size 4 \
+        -boot-info-table \
+        iso/
+    
+    echo -e "${GREEN}✓ ISO created: $ISO_OUTPUT${NC}"
+    echo -e "${GREEN}  Size: $(du -h "$SCRIPT_DIR/$ISO_OUTPUT" | cut -f1)${NC}"
+}
+
+# Create ISO only (using existing build)
+create_iso_only() {
+    if [ ! -d "$BUILD_DIR/squashfs" ]; then
+        echo -e "${RED}No build directory found. Run a build first.${NC}"
+        exit 1
+    fi
+    
+    create_iso
+}
+
+# Clean build directory
+clean_build() {
+    echo -e "${YELLOW}Cleaning build directory...${NC}"
+    
+    cleanup_chroot
+    
+    read -p "This will delete all build files. Continue? [y/N]: " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        sudo rm -rf "$BUILD_DIR"
+        echo -e "${GREEN}Build directory cleaned${NC}"
+    else
+        echo -e "${YELLOW}Cancelled${NC}"
+    fi
+}
+
+# Recovery mode for fixing broken installations
+recovery_mode() {
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║              RaptorOS Recovery Mode                      ║${NC}"
+    echo -e "${CYAN}║           Advanced System Recovery & Debugging          ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # Check if we have a broken installation to fix
+    if [ ! -d "$BUILD_DIR/squashfs" ]; then
+        echo -e "${RED}No build directory found. Cannot perform recovery.${NC}"
+        echo -e "${YELLOW}Please run a build first, then use recovery mode.${NC}"
+        exit 1
+    fi
+    
+    while true; do
+        echo -e "${YELLOW}Recovery Options:${NC}"
+        echo ""
+        echo "1) 🔧 Fix broken package installations"
+        echo "2) 💾 Restore from backup"
+        echo "3) 🚀 Reset to clean state"
+        echo "4) ✅ Validate system integrity"
+        echo "5) 🖥️  Chroot into existing build"
+        echo "6) 🔄 Reset configurations"
+        echo "7) 📊 Advanced diagnostics"
+        echo "8) 🆘 Emergency recovery"
+        echo "9) 🚪 Exit recovery mode"
+        echo ""
+        
+        read -p "Select recovery option [1-9]: " recovery_option
+        
+        case $recovery_option in
+            1)
+                fix_broken_packages
+                ;;
+            2)
+                restore_from_backup
+                ;;
+            3)
+                reset_to_clean_state
+                ;;
+            4)
+                validate_system_integrity
+                ;;
+            5)
+                chroot_into_build
+                ;;
+            6)
+                reset_configurations
+                ;;
+            7)
+                advanced_diagnostics
+                ;;
+            8)
+                emergency_recovery
+                ;;
+            9)
+                echo -e "${YELLOW}Exiting recovery mode${NC}"
+                return 0
+                ;;
+            *)
+                echo -e "${RED}Invalid recovery option${NC}"
+                ;;
+        esac
+        
+        echo ""
+        read -p "Press Enter to continue..."
+        echo ""
+    done
+}
+
+# Fix broken package installations
+fix_broken_packages() {
+    echo -e "${CYAN}🔧 Fixing broken package installations...${NC}"
+    echo ""
+    
+    cd "$BUILD_DIR/squashfs"
+    
+    # Mount necessary filesystems for chroot
+    mount_chroot_filesystems
+    
+    echo "Attempting to resume interrupted emerge..."
+    if sudo chroot . emerge --resume --skip-first; then
+        echo -e "${GREEN}✓ Package installation resumed successfully${NC}"
+    else
+        echo -e "${YELLOW}Package resume failed, trying alternative recovery methods...${NC}"
+        echo ""
+        
+        echo "1. Cleaning broken packages..."
+        sudo chroot . emerge --depclean -a
+        
+        echo "2. Rebuilding preserved packages..."
+        sudo chroot . emerge @preserved-rebuild
+        
+        echo "3. Attempting full system update..."
+        sudo chroot . emerge -avuDN @world --keep-going
+        
+        echo "4. Final cleanup..."
+        sudo chroot . emerge --depclean -a
+        sudo chroot . emerge @preserved-rebuild
+        
+        echo -e "${GREEN}✓ Package recovery completed${NC}"
+    fi
+    
+    # Unmount chroot filesystems
+    unmount_chroot_filesystems
+}
+
+# Restore from backup
+restore_from_backup() {
+    echo -e "${CYAN}💾 Restoring from backup...${NC}"
+    echo ""
+    
+    # Check for different types of backups
+    local backup_sources=(
+        "$BUILD_DIR/backup"
+        "$BUILD_DIR/backup-$(date +%Y%m%d)"
+        "$BUILD_DIR/snapshots/latest"
+        "$BUILD_DIR/snapshots/$(date +%Y%m%d)"
+    )
+    
+    local backup_found=""
+    for backup in "${backup_sources[@]}"; do
+        if [ -d "$backup" ]; then
+            backup_found="$backup"
+            break
+        fi
+    done
+    
+    if [ -n "$backup_found" ]; then
+        echo -e "${GREEN}Found backup: $backup_found${NC}"
+        echo ""
+        
+        echo "Backup contents:"
+        ls -la "$backup_found" | head -20
+        
+        echo ""
+        read -p "Restore from this backup? [y/N]: " restore_confirm
+        if [[ "$restore_confirm" =~ ^[Yy]$ ]]; then
+            echo "Creating backup of current state..."
+            sudo cp -r squashfs "squashfs-broken-$(date +%Y%m%d-%H%M%S)"
+            
+            echo "Restoring from backup..."
+            sudo rm -rf squashfs
+            sudo cp -r "$backup_found" squashfs
+            
+            echo -e "${GREEN}✓ System restored from backup${NC}"
+        else
+            echo -e "${YELLOW}Restore cancelled${NC}"
+        fi
+    else
+        echo -e "${RED}No backup found in expected locations${NC}"
+        echo ""
+        echo "Available directories:"
+        ls -la "$BUILD_DIR" | grep -E "(backup|snapshot)"
+        
+        echo ""
+        read -p "Enter custom backup path (or press Enter to skip): " custom_backup
+        if [ -n "$custom_backup" ] && [ -d "$custom_backup" ]; then
+            echo "Restoring from custom backup..."
+            sudo rm -rf squashfs
+            sudo cp -r "$custom_backup" squashfs
+            echo -e "${GREEN}✓ System restored from custom backup${NC}"
+        fi
+    fi
+}
+
+# Reset to clean state
+reset_to_clean_state() {
+    echo -e "${YELLOW}🚀 Resetting to clean state...${NC}"
+    echo ""
+    echo -e "${RED}⚠️  WARNING: This will completely reset the system!${NC}"
+    echo "All installed packages and configurations will be lost."
+    echo ""
+    
+    read -p "Are you absolutely sure? Type 'YES' to confirm: " reset_confirm
+    if [[ "$reset_confirm" == "YES" ]]; then
+        echo -e "${CYAN}Resetting system...${NC}"
+        
+        # Create emergency backup
+        if [ -d "squashfs" ]; then
+            echo "Creating emergency backup..."
+            sudo cp -r squashfs "emergency-backup-$(date +%Y%m%d-%H%M%S)"
+        fi
+        
+        # Reset
+        sudo rm -rf squashfs
+        setup_build_env
+        echo -e "${GREEN}✓ System reset to clean state${NC}"
+    else
+        echo -e "${YELLOW}Reset cancelled${NC}"
+    fi
+}
+
+# Validate system integrity
+validate_system_integrity() {
+    echo -e "${CYAN}✅ Validating system integrity...${NC}"
+    echo ""
+    
+    cd "$BUILD_DIR/squashfs"
+    
+    # Mount chroot filesystems
+    mount_chroot_filesystems
+    
+    local critical_files=(
+        "/etc/passwd"
+        "/etc/group"
+        "/etc/fstab"
+        "/etc/hostname"
+        "/etc/portage/make.conf"
+        "/boot/grub/grub.cfg"
+        "/usr/local/bin/raptoros-update"
+        "/usr/local/bin/validate-performance"
+    )
+    
+    local missing_files=0
+    local total_files=${#critical_files[@]}
+    
+    echo "Checking critical files..."
+    for file in "${critical_files[@]}"; do
+        if [ ! -f "$file" ]; then
+            echo -e "${RED}✗ Missing: $file${NC}"
+            missing_files=$((missing_files + 1))
+        else
+            echo -e "${GREEN}✓ Found: $file${NC}"
+        fi
+    done
+    
+    echo ""
+    echo "Checking package database..."
+    if sudo chroot . emerge --check-news-deps &>/dev/null; then
+        echo -e "${GREEN}✓ Package database integrity OK${NC}"
+    else
+        echo -e "${RED}✗ Package database issues detected${NC}"
+        missing_files=$((missing_files + 1))
+    fi
+    
+    echo ""
+    echo "Checking RaptorOS configurations..."
+    local raptoros_configs=(
+        "/etc/portage/env/gcc14-latest"
+        "/etc/portage/env/llvm20-mesa25"
+        "/etc/portage/package.env/modern-optimizations"
+        "/etc/portage/package.accept_keywords/raptoros-minimal-testing"
+    )
+    
+    for config in "${raptoros_configs[@]}"; do
+        if [ ! -f "$config" ]; then
+            echo -e "${RED}✗ Missing: $config${NC}"
+            missing_files=$((missing_files + 1))
+        else
+            echo -e "${GREEN}✓ Found: $config${NC}"
+        fi
+    done
+    
+    echo ""
+    echo "═══════════════════════════════"
+    echo "Integrity Check Results:"
+    echo "Files checked: $total_files"
+    echo "Missing files: $missing_files"
+    echo "Success rate: $(( (total_files - missing_files) * 100 / total_files ))%"
+    
+    if [ $missing_files -eq 0 ]; then
+        echo -e "${GREEN}🎉 System integrity check PASSED${NC}"
+    else
+        echo -e "${RED}⚠️  System integrity check FAILED${NC}"
+        echo "Consider using recovery options 1, 2, or 6 to fix issues."
+    fi
+    
+    # Unmount chroot filesystems
+    unmount_chroot_filesystems
+}
+
+# Chroot into existing build
+chroot_into_build() {
+    echo -e "${CYAN}🖥️  Chroot into existing build...${NC}"
+    echo ""
+    
+    cd "$BUILD_DIR/squashfs"
+    
+    # Mount necessary filesystems
+    mount_chroot_filesystems
+    
+    echo -e "${GREEN}Entering chroot environment...${NC}"
+    echo "Type 'exit' to return to recovery mode"
+    echo "Useful commands:"
+    echo "  - emerge --resume (resume interrupted emerge)"
+    echo "  - emerge @preserved-rebuild (rebuild preserved packages)"
+    echo "  - emerge --depclean (clean broken packages)"
+    echo "  - system-validator (run system validation)"
+    echo ""
+    
+    sudo chroot . /bin/bash
+    
+    # Unmount filesystems when exiting
+    unmount_chroot_filesystems
+    echo -e "${GREEN}Exited chroot environment${NC}"
+}
+
+# Reset configurations
+reset_configurations() {
+    echo -e "${CYAN}🔄 Resetting configurations...${NC}"
+    echo ""
+    
+    cd "$BUILD_DIR/squashfs"
+    
+    echo "This will reset all RaptorOS configurations to defaults."
+    read -p "Continue? [y/N]: " reset_confirm
+    if [[ "$reset_confirm" =~ ^[Yy]$ ]]; then
+        echo "Resetting configurations..."
+        
+        # Backup current configs
+        if [ -d "etc/portage" ]; then
+            sudo cp -r etc/portage "etc/portage-backup-$(date +%Y%m%d-%H%M%S)"
+        fi
+        
+        # Reset make.conf
+        if [ -f "$SCRIPT_DIR/configs/make.conf" ]; then
+            sudo cp "$SCRIPT_DIR/configs/make.conf" "etc/portage/make.conf"
+            echo "✓ make.conf reset"
+        fi
+        
+        # Reset package environments
+        if [ -d "$SCRIPT_DIR/configs/env" ]; then
+            sudo rm -rf etc/portage/env
+            sudo mkdir -p etc/portage/env
+            sudo cp -r "$SCRIPT_DIR/configs/env/"* etc/portage/env/
+            echo "✓ Package environments reset"
+        fi
+        
+        # Reset package environment mappings
+        if [ -d "$SCRIPT_DIR/configs/package.env" ]; then
+            sudo rm -rf etc/portage/package.env
+            sudo mkdir -p etc/portage/package.env
+            sudo cp -r "$SCRIPT_DIR/configs/package.env/"* etc/portage/package.env/
+            echo "✓ Package environment mappings reset"
+        fi
+        
+        # Reset package accept keywords
+        if [ -d "$SCRIPT_DIR/configs/package.accept_keywords" ]; then
+            sudo rm -rf etc/portage/package.accept_keywords
+            sudo mkdir -p etc/portage/package.accept_keywords
+            sudo cp -r "$SCRIPT_DIR/configs/package.accept_keywords/"* etc/portage/package.accept_keywords/
+            echo "✓ Package accept keywords reset"
+        fi
+        
+        # Reset gaming configurations
+        if [ -f "$SCRIPT_DIR/configs/gamemode.ini" ]; then
+            sudo cp "$SCRIPT_DIR/configs/gamemode.ini" "etc/gamemode.ini"
+            echo "✓ GameMode configuration reset"
+        fi
+        
+        if [ -f "$SCRIPT_DIR/configs/99-gaming.conf" ]; then
+            sudo mkdir -p etc/sysctl.d
+            sudo cp "$SCRIPT_DIR/configs/99-gaming.conf" "etc/sysctl.d/99-gaming.conf"
+            echo "✓ Gaming sysctl configuration reset"
+        fi
+        
+        echo -e "${GREEN}✓ All configurations reset to defaults${NC}"
+    else
+        echo -e "${YELLOW}Configuration reset cancelled${NC}"
+    fi
+}
+
+# Advanced diagnostics
+advanced_diagnostics() {
+    echo -e "${CYAN}📊 Advanced diagnostics...${NC}"
+    echo ""
+    
+    cd "$BUILD_DIR/squashfs"
+    
+    # Mount chroot filesystems
+    mount_chroot_filesystems
+    
+    echo "Running comprehensive system diagnostics..."
+    echo ""
+    
+    # Check system status
+    echo "=== System Status ==="
+    sudo chroot . systemctl --failed 2>/dev/null || echo "No failed services (or not systemd)"
+    
+    echo ""
+    echo "=== Package Issues ==="
+    sudo chroot . emerge --check-news-deps 2>&1 | head -20
+    
+    echo ""
+    echo "=== Disk Usage ==="
+    sudo chroot . df -h
+    
+    echo ""
+    echo "=== Memory Usage ==="
+    sudo chroot . free -h 2>/dev/null || echo "Memory info not available"
+    
+    echo ""
+    echo "=== Recent Logs ==="
+    sudo chroot . journalctl --no-pager -n 20 2>/dev/null || echo "Journal logs not available"
+    
+    # Unmount chroot filesystems
+    unmount_chroot_filesystems
+}
+
+# Emergency recovery
+emergency_recovery() {
+    echo -e "${RED}🆘 EMERGENCY RECOVERY MODE${NC}"
+    echo ""
+    echo -e "${RED}⚠️  This is for critical system failures only!${NC}"
+    echo ""
+    
+    read -p "Are you experiencing a complete system failure? [y/N]: " emergency_confirm
+    if [[ "$emergency_confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${CYAN}Initiating emergency recovery...${NC}"
+        
+        # Create emergency backup
+        if [ -d "squashfs" ]; then
+            echo "Creating emergency backup..."
+            sudo cp -r squashfs "emergency-backup-$(date +%Y%m%d-%H%M%S)"
+        fi
+        
+        # Attempt to fix critical issues
+        echo "1. Checking filesystem integrity..."
+        if [ -d "squashfs" ]; then
+            cd squashfs
+            sudo find . -type f -name "*.so*" -exec file {} \; 2>/dev/null | grep -i "corrupt\|error" || echo "No corrupted libraries found"
+        fi
+        
+        echo "2. Attempting package database recovery..."
+        if [ -d "squashfs" ]; then
+            mount_chroot_filesystems
+            sudo chroot . emerge --regen 2>/dev/null || echo "Package database recovery failed"
+            unmount_chroot_filesystems
+        fi
+        
+        echo "3. Checking for hardware issues..."
+        echo "CPU: $(lscpu | grep "Model name" | head -1 | cut -d: -f2 | xargs)"
+        echo "Memory: $(free -h | grep Mem | awk '{print $2}')"
+        echo "Disk: $(df -h / | tail -1 | awk '{print $1}')"
+        
+        echo ""
+        echo -e "${YELLOW}Emergency recovery completed.${NC}"
+        echo "If the system is still broken, consider:"
+        echo "1. Complete system reset (option 3)"
+        echo "2. Restore from backup (option 2)"
+        echo "3. Manual intervention in chroot (option 5)"
+    else
+        echo -e "${YELLOW}Emergency recovery cancelled${NC}"
+    fi
+}
+
+# Create backup of the build
+create_backup() {
+    echo -e "${CYAN}💾 Creating backup of the build...${NC}"
+    
+    # Create backup directory
+    local backup_dir="$BUILD_DIR/backup-$(date +%Y%m%d-%H%M%S)"
+    sudo mkdir -p "$backup_dir"
+    
+    # Copy the build
+    echo "Copying build to backup..."
+    sudo cp -r squashfs "$backup_dir/"
+    
+    # Create a "latest" symlink
+    sudo rm -f "$BUILD_DIR/backup-latest"
+    sudo ln -s "$(basename "$backup_dir")" "$BUILD_DIR/backup-latest"
+    
+    # Show backup info
+    local backup_size=$(du -sh "$backup_dir" | cut -f1)
+    echo -e "${GREEN}✓ Backup created: $backup_dir (${backup_size})${NC}"
+    echo "Latest backup: $BUILD_DIR/backup-latest"
+    
+    # Clean old backups (keep last 3)
+    local backup_count=$(find "$BUILD_DIR" -maxdepth 1 -name "backup-*" -type d | wc -l)
+    if [ $backup_count -gt 3 ]; then
+        echo "Cleaning old backups..."
+        find "$BUILD_DIR" -maxdepth 1 -name "backup-*" -type d -printf '%T@ %p\n' | sort -n | head -n $((backup_count - 3)) | cut -d' ' -f2- | xargs -r sudo rm -rf
+        echo "✓ Old backups cleaned"
+    fi
+}
+
+# Mount chroot filesystems
+mount_chroot_filesystems() {
+    echo "Mounting chroot filesystems..."
+    sudo mount -t proc /proc proc 2>/dev/null || true
+    sudo mount --rbind /sys sys 2>/dev/null || true
+    sudo mount --rbind /dev dev 2>/dev/null || true
+    sudo mount --bind /run run 2>/dev/null || true
+    sudo cp -L /etc/resolv.conf etc/ 2>/dev/null || true
+}
+
+# Unmount chroot filesystems
+unmount_chroot_filesystems() {
+    echo "Unmounting chroot filesystems..."
+    sudo umount -l proc 2>/dev/null || true
+    sudo umount -l sys 2>/dev/null || true
+    sudo umount -l dev 2>/dev/null || true
+    sudo umount -l run 2>/dev/null || true
+}
+
+# Main execution
+main() {
+    show_banner
+    check_requirements
+    detect_hardware
+    show_build_menu
+}
+
+# Trap to ensure cleanup on exit
+trap cleanup_chroot EXIT
+
+# Run if not sourced
+if [ "${BASH_SOURCE[0]}" == "${0}" ]; then
+    main "$@"
+fi

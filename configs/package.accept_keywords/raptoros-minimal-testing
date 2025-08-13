@@ -1,0 +1,42 @@
+# RaptorOS Minimal Testing Strategy - December 2024
+# Most packages are already cutting-edge in stable!
+
+# NVIDIA Drivers - Testing worth it
+# 580.76.05 has significant improvements over 570.172.08
+x11-drivers/nvidia-drivers ~amd64
+
+# Mesa - OPTIONAL
+# 25.1.7 stable is already excellent, 25.2.0 testing is marginal improvement
+# Only use testing if you need absolute latest features
+# media-libs/mesa ~amd64
+
+# Wine/Proton - Always use latest for game compatibility
+app-emulation/wine-staging ~amd64
+app-emulation/wine-proton ~amd64
+app-emulation/wine-gecko ~amd64
+app-emulation/wine-mono ~amd64
+virtual/wine ~amd64
+app-emulation/vkd3d-proton ~amd64
+app-emulation/dxvk ~amd64
+app-emulation/dxvk-bin ~amd64
+
+# Gaming Tools - These update frequently
+games-util/steam-launcher ~amd64
+games-util/steam-meta ~amd64
+games-util/lutris ~amd64
+games-util/heroic-games-launcher-bin ~amd64
+games-util/gamemode ~amd64
+games-util/mangohud ~amd64
+games-util/gamescope ~amd64
+sys-apps/gamemode-daemon ~amd64
+
+# Kernel - Optional, stable is usually fine
+# sys-kernel/gentoo-sources ~amd64
+# sys-kernel/linux-firmware ~amd64
+
+# Wayland Compositors (if using)
+gui-wm/hyprland ~amd64
+gui-libs/aquamarine ~amd64
+gui-apps/waybar ~amd64
+
+# That's it! Everything else in stable is already modern!
