@@ -1,304 +1,418 @@
-to make my cachyOS doesnt need to be hard reboot everytime when in chroot installing this gentoo failed I have to use ctrl+c command it will made my cachyOS not usable, This is a critical issue! When you Ctrl+C out of a chroot, the mounted filesystems (proc, sys, dev, run) remain mounted, which can make your host system unstable. Here's how to fix and prevent this:
+Your desktop is logging out because the build process is consuming too much RAM, triggering the OOM (Out of Memory) killer which terminates your desktop session. The `-j48 -l48` settings in your build.sh are way too aggressive!
 
-## Immediate Fix - Clean Up Existing Mounts
+## Immediate Fix - Reduce Resource Usage
 
-If your system is currently unstable, run this cleanup script:
+### 1. Update build.sh with Reasonable Values
+
+Replace the resource settings at the top of build.sh:
 
 ```bash
-#!/bin/bash
-# Save as: cleanup-mounts.sh
-
-echo "Emergency cleanup of Gentoo build mounts..."
-
-# Find and unmount all gentoo-related mounts
+# Configuration (FIXED VALUES)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="/var/tmp/gentoo-gaming-build"
 
-# Force unmount in reverse order (important!)
-if [ -d "$BUILD_DIR/squashfs" ]; then
-    echo "Unmounting chroot filesystems..."
+# Auto-detect reasonable values based on system resources
+detect_build_resources() {
+    local cpu_cores=$(nproc)
+    local total_ram=$(free -g | awk '/^Mem:/{print $2}')
     
-    # Kill any processes using the mounts
-    sudo fuser -km "$BUILD_DIR/squashfs/dev" 2>/dev/null || true
-    sudo fuser -km "$BUILD_DIR/squashfs/proc" 2>/dev/null || true
-    sudo fuser -km "$BUILD_DIR/squashfs/sys" 2>/dev/null || true
-    sudo fuser -km "$BUILD_DIR/squashfs/run" 2>/dev/null || true
+    # Calculate safe job count (lesser of CPU cores or RAM/2GB)
+    local max_jobs_by_ram=$((total_ram / 2))  # 2GB per job
+    local max_jobs_by_cpu=$((cpu_cores))
     
-    # Unmount everything
-    sudo umount -R "$BUILD_DIR/squashfs/dev" 2>/dev/null || true
-    sudo umount -R "$BUILD_DIR/squashfs/proc" 2>/dev/null || true  
-    sudo umount -R "$BUILD_DIR/squashfs/sys" 2>/dev/null || true
-    sudo umount -R "$BUILD_DIR/squashfs/run" 2>/dev/null || true
-    
-    # Force unmount if still mounted
-    sudo umount -lf "$BUILD_DIR/squashfs/dev" 2>/dev/null || true
-    sudo umount -lf "$BUILD_DIR/squashfs/proc" 2>/dev/null || true
-    sudo umount -lf "$BUILD_DIR/squashfs/sys" 2>/dev/null || true
-    sudo umount -lf "$BUILD_DIR/squashfs/run" 2>/dev/null || true
-fi
-
-# Check what's still mounted
-echo ""
-echo "Checking for remaining mounts..."
-mount | grep "$BUILD_DIR" || echo "All mounts cleaned!"
-
-echo "System should be stable now."
-```
-
-## Permanent Fix - Update build.sh with Proper Signal Handling
-
-Replace the trap section in your build.sh with this enhanced version:
-
-```bash
-# Enhanced signal handling and cleanup
-cleanup_on_signal() {
-    echo ""
-    echo -e "${RED}Build interrupted! Cleaning up...${NC}"
-    
-    # Set a flag to prevent recursive cleanup
-    if [ "${CLEANUP_IN_PROGRESS}" = "true" ]; then
-        return
-    fi
-    export CLEANUP_IN_PROGRESS=true
-    
-    # Kill any running chroot processes
-    if [ -n "${CHROOT_PID}" ]; then
-        echo "Killing chroot processes..."
-        sudo kill -TERM ${CHROOT_PID} 2>/dev/null || true
-        sleep 2
-        sudo kill -KILL ${CHROOT_PID} 2>/dev/null || true
+    # Use the smaller value for safety
+    if [ $max_jobs_by_ram -lt $max_jobs_by_cpu ]; then
+        JOBS=$max_jobs_by_ram
+    else
+        JOBS=$max_jobs_by_cpu
     fi
     
-    # Force cleanup of mounts
-    force_cleanup_chroot
+    # Never exceed 75% of CPU cores
+    local safe_jobs=$((cpu_cores * 3 / 4))
+    if [ $JOBS -gt $safe_jobs ]; then
+        JOBS=$safe_jobs
+    fi
     
-    echo -e "${GREEN}Cleanup complete. Your system should be stable.${NC}"
-    exit 130  # Standard exit code for Ctrl+C
+    # Minimum 2, maximum 16 for safety
+    if [ $JOBS -lt 2 ]; then
+        JOBS=2
+    elif [ $JOBS -gt 16 ]; then
+        JOBS=16
+    fi
+    
+    # Load average should be CPU cores minus 2 (leave headroom)
+    LOAD=$((cpu_cores - 2))
+    if [ $LOAD -lt 2 ]; then
+        LOAD=2
+    fi
+    
+    echo -e "${CYAN}Build resources calculated:${NC}"
+    echo -e "  CPU cores: $cpu_cores"
+    echo -e "  Total RAM: ${total_ram}GB"
+    echo -e "  Safe JOBS: $JOBS"
+    echo -e "  Safe LOAD: $LOAD"
 }
 
-# Enhanced cleanup function with force unmount
-force_cleanup_chroot() {
-    echo -e "${CYAN}Force cleaning up chroot mounts...${NC}"
+# Call this function early in the script
+detect_build_resources
+```
+
+### 2. Create Resource Monitor Script
+
+Save this as `resource-monitor.sh` and run it before/during builds:
+
+```bash
+#!/bin/bash
+# resource-monitor.sh - Monitors system resources and kills build if needed
+
+EMERGENCY_STOP_FILE="/tmp/gentoo-build-emergency-stop"
+BUILD_DIR="/var/tmp/gentoo-gaming-build"
+
+# Thresholds
+MAX_RAM_PERCENT=85
+MAX_SWAP_PERCENT=50
+MIN_FREE_RAM_MB=2048
+MAX_TEMP_CELSIUS=85
+
+monitor_resources() {
+    while true; do
+        # Check RAM usage
+        local ram_percent=$(free | grep Mem | awk '{print int($3/$2 * 100)}')
+        local swap_percent=$(free | grep Swap | awk '{if ($2 > 0) print int($3/$2 * 100); else print 0}')
+        local free_ram_mb=$(free -m | grep Mem | awk '{print $4}')
+        
+        # Check CPU temperature (if sensors available)
+        local cpu_temp=0
+        if command -v sensors &>/dev/null; then
+            cpu_temp=$(sensors | grep -E "Core|Tctl" | awk '{print $3}' | grep -o '[0-9]*' | sort -rn | head -1)
+        fi
+        
+        # Display status
+        clear
+        echo "=== Gentoo Build Resource Monitor ==="
+        echo "Time: $(date '+%H:%M:%S')"
+        echo ""
+        echo "RAM Usage: ${ram_percent}% (Free: ${free_ram_mb}MB)"
+        echo "Swap Usage: ${swap_percent}%"
+        echo "CPU Temp: ${cpu_temp}°C"
+        echo "Load Average: $(uptime | awk -F'load average:' '{print $2}')"
+        echo ""
+        
+        # Check critical conditions
+        local critical=false
+        local warning=""
+        
+        if [ $ram_percent -gt $MAX_RAM_PERCENT ]; then
+            warning="${warning}⚠️  RAM usage critical (${ram_percent}%)!\n"
+            critical=true
+        fi
+        
+        if [ $swap_percent -gt $MAX_SWAP_PERCENT ] && [ $swap_percent -gt 0 ]; then
+            warning="${warning}⚠️  Swap usage high (${swap_percent}%)!\n"
+        fi
+        
+        if [ $free_ram_mb -lt $MIN_FREE_RAM_MB ]; then
+            warning="${warning}⚠️  Free RAM too low (${free_ram_mb}MB)!\n"
+            critical=true
+        fi
+        
+        if [ $cpu_temp -gt $MAX_TEMP_CELSIUS ] && [ $cpu_temp -gt 0 ]; then
+            warning="${warning}🔥 CPU temperature critical (${cpu_temp}°C)!\n"
+            critical=true
+        fi
+        
+        if [ -n "$warning" ]; then
+            echo -e "WARNINGS:\n$warning"
+        fi
+        
+        # Emergency stop if critical
+        if [ "$critical" = true ]; then
+            echo -e "\n🛑 CRITICAL: Creating emergency stop file!"
+            touch "$EMERGENCY_STOP_FILE"
+            
+            # Try to reduce load
+            echo "Attempting to reduce system load..."
+            pkill -STOP -f "emerge"  # Pause emerge
+            sleep 10
+            pkill -CONT -f "emerge"  # Resume emerge
+        fi
+        
+        echo ""
+        echo "Press Ctrl+C to stop monitoring"
+        echo "(Monitor refreshes every 10 seconds)"
+        
+        sleep 10
+    done
+}
+
+# Run monitor
+trap "rm -f $EMERGENCY_STOP_FILE 2>/dev/null" EXIT
+monitor_resources
+```
+
+### 3. Update make.conf for Dynamic Resource Management
+
+Update the configure_portage function in build.sh:
+
+```bash
+configure_portage() {
+    echo -e "${CYAN}Configuring Portage with resource limits...${NC}"
     
-    local build_dir="${BUILD_DIR:-/var/tmp/gentoo-gaming-build}"
+    # Copy base config
+    sudo cp "$SCRIPT_DIR/configs/make.conf" "squashfs/etc/portage/make.conf"
     
-    if [ ! -d "$build_dir/squashfs" ]; then
-        return
-    fi
+    # Add dynamic resource limits
+    sudo tee -a squashfs/etc/portage/make.conf > /dev/null << EOF
+
+# --- Dynamic Resource Management ---
+# Generated: $(date)
+# System: $(free -h | grep Mem | awk '{print $2}') RAM, $(nproc) cores
+
+# Conservative build settings to prevent OOM
+MAKEOPTS="-j${JOBS} -l${LOAD}"
+EMERGE_DEFAULT_OPTS="--jobs=${JOBS} --load-average=${LOAD} --keep-going"
+
+# Memory management
+PORTAGE_NICENESS="19"
+PORTAGE_IONICE_COMMAND="ionice -c 3 -p \${PID}"
+
+# Prevent memory exhaustion
+PORTAGE_TMPDIR="/var/tmp"
+PORTAGE_MEMORY_LIMIT="80%"
+EOF
     
-    cd / # Change to root to avoid being in mounted directory
+    echo -e "${GREEN}✓ Resource limits configured${NC}"
+}
+```
+
+### 4. Add OOM Protection Script
+
+Create `oom-protection.sh`:
+
+```bash
+#!/bin/bash
+# OOM Protection for Gentoo Build
+
+# Adjust OOM scores to protect desktop
+protect_desktop() {
+    echo "Protecting desktop environment from OOM killer..."
     
-    # Kill processes using the mounts
-    echo "Terminating processes using mounts..."
-    sudo fuser -km "$build_dir/squashfs/dev" 2>/dev/null || true
-    sudo fuser -km "$build_dir/squashfs/proc" 2>/dev/null || true
-    sudo fuser -km "$build_dir/squashfs/sys" 2>/dev/null || true
-    sudo fuser -km "$build_dir/squashfs/run" 2>/dev/null || true
-    
-    # Wait a moment for processes to die
-    sleep 2
-    
-    # Unmount in correct order (most specific first)
-    echo "Unmounting filesystems..."
-    
-    # Find all submounts and unmount them first
-    for mount in $(findmnt -R "$build_dir/squashfs" -o TARGET --noheadings | tac); do
-        sudo umount -l "$mount" 2>/dev/null || true
+    # Protect critical desktop processes
+    for process in plasmashell kwin_x11 kwin_wayland gnome-shell xfce4-session mate-session cinnamon budgie-panel sway wayfire; do
+        pgrep "$process" | while read pid; do
+            echo -1000 | sudo tee /proc/$pid/oom_score_adj >/dev/null 2>&1
+            echo "Protected: $process (PID: $pid)"
+        done
     done
     
-    # Force unmount the main ones
-    sudo umount -R "$build_dir/squashfs/run" 2>/dev/null || true
-    sudo umount -R "$build_dir/squashfs/dev" 2>/dev/null || true
-    sudo umount -R "$build_dir/squashfs/sys" 2>/dev/null || true
-    sudo umount -R "$build_dir/squashfs/proc" 2>/dev/null || true
+    # Make build processes more likely to be killed
+    pgrep -f "emerge\|gcc\|g\+\+\|cc1\|cc1plus" | while read pid; do
+        echo 500 | sudo tee /proc/$pid/oom_score_adj >/dev/null 2>&1
+    done
     
-    # Last resort - lazy unmount
-    sudo umount -lf "$build_dir/squashfs/run" 2>/dev/null || true
-    sudo umount -lf "$build_dir/squashfs/dev/pts" 2>/dev/null || true
-    sudo umount -lf "$build_dir/squashfs/dev/shm" 2>/dev/null || true
-    sudo umount -lf "$build_dir/squashfs/dev" 2>/dev/null || true
-    sudo umount -lf "$build_dir/squashfs/sys" 2>/dev/null || true
-    sudo umount -lf "$build_dir/squashfs/proc" 2>/dev/null || true
-    
-    echo -e "${GREEN}✓ Chroot cleanup complete${NC}"
+    echo "OOM protection applied"
 }
 
-# Register signal handlers
-trap cleanup_on_signal INT TERM
-trap force_cleanup_chroot EXIT
+# Set up memory limits for build
+setup_memory_limits() {
+    # Get total RAM in KB
+    local total_ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    # Reserve 4GB for system (4 * 1024 * 1024 KB)
+    local reserved_kb=$((4 * 1024 * 1024))
+    # Available for build
+    local build_limit_kb=$((total_ram_kb - reserved_kb))
+    
+    # Create systemd slice for build (if using systemd)
+    if command -v systemctl &>/dev/null; then
+        sudo systemd-run --uid=$(id -u) --gid=$(id -g) \
+            --slice=gentoo-build.slice \
+            --property=MemoryMax=${build_limit_kb}K \
+            --property=MemorySwapMax=0 \
+            --property=CPUQuota=80% \
+            --remain-after-exit \
+            --unit=gentoo-build \
+            bash -c "echo 'Memory limits applied for build'"
+    fi
+    
+    echo "Build memory limit: $((build_limit_kb / 1024 / 1024))GB"
+}
+
+protect_desktop
+setup_memory_limits
 ```
 
-## Safe Chroot Wrapper Function
+### 5. Enhanced Safe Build Wrapper
 
-Replace your chroot commands with this safer wrapper:
-
-```bash
-# Safe chroot execution with automatic cleanup
-safe_chroot_exec() {
-    local chroot_script="$1"
-    local chroot_dir="${BUILD_DIR}/squashfs"
-    
-    echo -e "${CYAN}Entering safe chroot environment...${NC}"
-    
-    # Setup chroot
-    setup_chroot
-    
-    # Create a temporary script
-    local temp_script=$(mktemp)
-    cat > "$temp_script" << 'SCRIPT_END'
-#!/bin/bash
-set -e
-source /etc/profile
-
-# Add timeout to prevent hanging
-timeout_handler() {
-    echo "Command timed out!"
-    exit 1
-}
-trap timeout_handler TERM
-
-SCRIPT_END
-    
-    # Add the actual commands
-    echo "$chroot_script" >> "$temp_script"
-    
-    # Copy script to chroot
-    sudo cp "$temp_script" "$chroot_dir/tmp/chroot_script.sh"
-    sudo chmod +x "$chroot_dir/tmp/chroot_script.sh"
-    rm "$temp_script"
-    
-    # Execute with timeout and cleanup
-    (
-        # Run in subshell to capture PID
-        sudo timeout --preserve-status 3600 \
-            chroot "$chroot_dir" /tmp/chroot_script.sh
-    ) &
-    
-    CHROOT_PID=$!
-    
-    # Wait for completion or interruption
-    wait $CHROOT_PID 2>/dev/null || {
-        local exit_code=$?
-        if [ $exit_code -eq 130 ] || [ $exit_code -eq 143 ]; then
-            echo -e "${YELLOW}Chroot interrupted by user${NC}"
-        elif [ $exit_code -eq 124 ]; then
-            echo -e "${RED}Chroot timed out after 1 hour${NC}"
-        else
-            echo -e "${RED}Chroot failed with exit code: $exit_code${NC}"
-        fi
-    }
-    
-    # Always cleanup
-    cleanup_chroot
-    
-    # Remove temporary script
-    sudo rm -f "$chroot_dir/tmp/chroot_script.sh"
-    
-    unset CHROOT_PID
-}
-```
-
-## Usage Example
-
-Update your build functions to use the safe wrapper:
+Replace your build functions with this safer version:
 
 ```bash
-build_quick() {
-    echo -e "${CYAN}Starting quick build (binary packages)...${NC}"
+build_quick_safe() {
+    echo -e "${CYAN}Starting safe quick build...${NC}"
     
+    # Run OOM protection
+    if [ -f "./oom-protection.sh" ]; then
+        ./oom-protection.sh
+    fi
+    
+    # Start resource monitor in background
+    if [ -f "./resource-monitor.sh" ]; then
+        screen -dmS resource-monitor ./resource-monitor.sh
+        echo -e "${GREEN}Resource monitor started (screen -r resource-monitor to view)${NC}"
+    fi
+    
+    # Create swap file if needed
+    ensure_swap
+    
+    # Regular build steps with safety checks
     setup_build_env
     configure_portage
     configure_repos
+    setup_chroot
     
-    # Use safe chroot execution
-    safe_chroot_exec '
+    # Safe chroot with memory limits
+    sudo systemd-run --uid=0 --gid=0 \
+        --property=MemoryMax=12G \
+        --property=CPUQuota=75% \
+        --pipe \
+        chroot squashfs /bin/bash << 'CHROOTCMD'
+#!/bin/bash
+source /etc/profile
+
+# Check emergency stop before each major operation
+check_emergency() {
+    if [ -f "/tmp/gentoo-build-emergency-stop" ]; then
+        echo "EMERGENCY STOP DETECTED! Halting build..."
+        exit 1
+    fi
+}
+
 # Sync portage
+check_emergency
 emerge-webrsync
 
-# Install packages
+# Install packages with checks
+check_emergency
 emerge --quiet --getbinpkg -av \
-    sys-kernel/gentoo-kernel-bin \
-    sys-kernel/linux-firmware \
-    sys-boot/grub
+    sys-kernel/gentoo-kernel-bin || exit 1
 
-# Add more packages...
-'
+check_emergency
+emerge --quiet --getbinpkg -av \
+    sys-kernel/linux-firmware || exit 1
+
+# Continue with other packages...
+CHROOTCMD
     
-    create_backup
+    cleanup_chroot
     create_installer
     create_iso
+    
+    # Stop resource monitor
+    screen -X -S resource-monitor quit 2>/dev/null
+    
+    echo -e "${GREEN}Build completed safely!${NC}"
 }
 ```
 
-## Prevention Script - Run Before Building
+### 6. Ensure Adequate Swap
 
-Create this helper script to check system state before building:
+Add this function to build.sh:
+
+```bash
+ensure_swap() {
+    echo -e "${CYAN}Checking swap space...${NC}"
+    
+    local swap_total=$(free -g | awk '/^Swap:/{print $2}')
+    local ram_total=$(free -g | awk '/^Mem:/{print $2}')
+    
+    if [ $swap_total -lt 8 ]; then
+        echo -e "${YELLOW}⚠️  Swap space low (${swap_total}GB)${NC}"
+        echo "Creating temporary swap file..."
+        
+        local swapfile="/var/tmp/gentoo-build.swap"
+        if [ ! -f "$swapfile" ]; then
+            sudo dd if=/dev/zero of="$swapfile" bs=1G count=16 status=progress
+            sudo chmod 600 "$swapfile"
+            sudo mkswap "$swapfile"
+            sudo swapon "$swapfile"
+            echo -e "${GREEN}✓ 16GB swap file created${NC}"
+            
+            # Mark for cleanup
+            echo "$swapfile" > /tmp/gentoo-build-swapfile
+        fi
+    else
+        echo -e "${GREEN}✓ Adequate swap space (${swap_total}GB)${NC}"
+    fi
+}
+
+# Add to cleanup
+cleanup_swap() {
+    if [ -f /tmp/gentoo-build-swapfile ]; then
+        local swapfile=$(cat /tmp/gentoo-build-swapfile)
+        sudo swapoff "$swapfile" 2>/dev/null
+        sudo rm -f "$swapfile"
+        rm -f /tmp/gentoo-build-swapfile
+    fi
+}
+```
+
+### 7. Run Build with Nice and Ionice
+
+When starting the build:
+
+```bash
+# Run build with low priority
+nice -n 19 ionice -c 3 ./build.sh
+```
+
+### 8. Quick System Check Script
+
+Run this before building:
 
 ```bash
 #!/bin/bash
-# Save as: pre-build-check.sh
+# pre-flight-check.sh
 
-echo "Pre-build system check..."
+echo "=== Pre-flight System Check ==="
 
-# Check for existing mounts
-BUILD_DIR="/var/tmp/gentoo-gaming-build"
+# Check RAM
+total_ram=$(free -g | awk '/^Mem:/{print $2}')
+if [ $total_ram -lt 16 ]; then
+    echo "⚠️  WARNING: Only ${total_ram}GB RAM detected"
+    echo "   Recommended: 16GB minimum, 32GB optimal"
+fi
 
-if mount | grep -q "$BUILD_DIR"; then
-    echo -e "\033[0;31mERROR: Found existing mounts from previous build!\033[0m"
-    mount | grep "$BUILD_DIR"
-    echo ""
-    read -p "Clean up mounts? [Y/n]: " cleanup
-    if [[ ! "$cleanup" =~ ^[Nn]$ ]]; then
-        ./cleanup-mounts.sh
-    else
-        echo "Cannot proceed with existing mounts. Exiting."
-        exit 1
+# Check swap
+total_swap=$(free -g | awk '/^Swap:/{print $2}')
+if [ $total_swap -lt 8 ]; then
+    echo "⚠️  WARNING: Only ${total_swap}GB swap detected"
+    echo "   Recommended: At least 8GB swap"
+fi
+
+# Check disk space
+avail_space=$(df -BG /var/tmp | awk 'NR==2 {print int($4)}')
+if [ $avail_space -lt 50 ]; then
+    echo "⚠️  WARNING: Only ${avail_space}GB free in /var/tmp"
+fi
+
+# Check if running on battery (laptops)
+if [ -f /sys/class/power_supply/BAT0/status ]; then
+    battery_status=$(cat /sys/class/power_supply/BAT0/status)
+    if [ "$battery_status" != "Charging" ] && [ "$battery_status" != "Full" ]; then
+        echo "⚠️  WARNING: Running on battery power!"
     fi
 fi
 
-# Check system resources
-echo "System resources:"
-echo "  CPU Load: $(uptime | awk -F'load average:' '{print $2}')"
-echo "  Memory: $(free -h | grep Mem | awk '{print "Used: " $3 " / Total: " $2}')"
-echo "  Disk: $(df -h /var/tmp | tail -1 | awk '{print "Available: " $4}')"
-
-echo -e "\033[0;32mSystem ready for build!\033[0m"
+echo ""
+read -p "Continue with build? [y/N]: " continue
+if [[ ! "$continue" =~ ^[Yy]$ ]]; then
+    exit 1
+fi
 ```
 
-## Additional Safety Measures
+The main issues causing your logouts are:
+1. **Too many parallel jobs** (48 is insane for most systems)
+2. **No memory limits** on the build process
+3. **No OOM protection** for your desktop
+4. **Insufficient swap space**
 
-1. **Always use screen or tmux** when building:
-```bash
-# Start a screen session
-screen -S gentoo-build
-./build.sh
-
-# If disconnected, reattach with:
-screen -r gentoo-build
-```
-
-2. **Add timeout to emerge commands**:
-```bash
-# In chroot commands, use timeout
-timeout 1800 emerge --sync  # 30 minute timeout
-```
-
-3. **Monitor script** to run in another terminal:
-```bash
-#!/bin/bash
-# Save as: monitor-build.sh
-
-while true; do
-    clear
-    echo "=== Build Monitor ==="
-    echo "Mounts:"
-    mount | grep gentoo-gaming-build || echo "  None"
-    echo ""
-    echo "Processes in chroot:"
-    ps aux | grep -E "chroot.*squashfs" | grep -v grep || echo "  None"
-    echo ""
-    echo "Press Ctrl+C to stop monitoring"
-    sleep 5
-done
-```
-
-These improvements will prevent your CachyOS from becoming unstable when builds are interrupted. The key is proper signal handling and forced cleanup of all mount points.
+Apply these fixes and your system should remain stable during builds!

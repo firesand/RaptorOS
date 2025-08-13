@@ -26,8 +26,53 @@ BUILD_DIR="/var/tmp/gentoo-gaming-build"
 ISO_OUTPUT="raptoros-gaming-$(date +%Y%m%d)-${STAGE3_TYPE:-desktop-openrc}.iso"
 STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/"
 STAGE3_PATTERN="stage3-amd64-desktop-openrc"
-JOBS=48
-LOAD=48
+
+# Auto-detect reasonable values based on system resources
+detect_build_resources() {
+    local cpu_cores=$(nproc)
+    local total_ram=$(free -g | awk '/^Mem:/{print $2}')
+    
+    # Calculate safe job count (lesser of CPU cores or RAM/2GB)
+    local max_jobs_by_ram=$((total_ram / 2))  # 2GB per job
+    local max_jobs_by_cpu=$((cpu_cores))
+    
+    # Use the smaller value for safety
+    if [ $max_jobs_by_ram -lt $max_jobs_by_cpu ]; then
+        JOBS=$max_jobs_by_ram
+    else
+        JOBS=$max_jobs_by_cpu
+    fi
+    
+    # Never exceed 75% of CPU cores
+    local safe_jobs=$((cpu_cores * 3 / 4))
+    if [ $JOBS -gt $safe_jobs ]; then
+        JOBS=$safe_jobs
+    fi
+    
+    # Minimum 2, maximum 16 for safety
+    if [ $JOBS -lt 2 ]; then
+        JOBS=2
+    elif [ $JOBS -gt 16 ]; then
+        JOBS=16
+    fi
+    
+    # Load average should be CPU cores minus 2 (leave headroom)
+    LOAD=$((cpu_cores - 2))
+    if [ $LOAD -lt 2 ]; then
+        LOAD=2
+    fi
+    
+    echo -e "${CYAN}Build resources calculated:${NC}"
+    echo -e "  CPU cores: $cpu_cores"
+    echo -e "  Total RAM: ${total_ram}GB"
+    echo -e "  Safe JOBS: $JOBS"
+    echo -e "  Safe LOAD: $LOAD"
+    echo ""
+}
+
+# Initialize with safe defaults
+JOBS=4
+LOAD=4
 
 # Colors
 RED='\033[0;31m'
@@ -126,6 +171,44 @@ check_requirements() {
     fi
     
     echo -e "${GREEN}✓ All requirements met${NC}"
+}
+
+# Ensure adequate swap space
+ensure_swap() {
+    echo -e "${CYAN}Checking swap space...${NC}"
+    
+    local swap_total=$(free -g | awk '/^Swap:/{print $2}')
+    local ram_total=$(free -g | awk '/^Mem:/{print $2}')
+    
+    if [ $swap_total -lt 8 ]; then
+        echo -e "${YELLOW}⚠️  Swap space low (${swap_total}GB)${NC}"
+        echo "Creating temporary swap file..."
+        
+        local swapfile="/var/tmp/gentoo-build.swap"
+        if [ ! -f "$swapfile" ]; then
+            sudo dd if=/dev/zero of="$swapfile" bs=1G count=16 status=progress
+            sudo chmod 600 "$swapfile"
+            sudo mkswap "$swapfile"
+            sudo swapon "$swapfile"
+            echo -e "${GREEN}✓ 16GB swap file created${NC}"
+            
+            # Mark for cleanup
+            echo "$swapfile" > /tmp/gentoo-build-swapfile
+        fi
+    else
+        echo -e "${GREEN}✓ Adequate swap space (${swap_total}GB)${NC}"
+    fi
+}
+
+# Cleanup swap file
+cleanup_swap() {
+    if [ -f /tmp/gentoo-build-swapfile ]; then
+        local swapfile=$(cat /tmp/gentoo-build-swapfile)
+        sudo swapoff "$swapfile" 2>/dev/null
+        sudo rm -f "$swapfile"
+        rm -f /tmp/gentoo-build-swapfile
+        echo -e "${GREEN}✓ Temporary swap file cleaned up${NC}"
+    fi
 }
 
 # Detect hardware
@@ -333,10 +416,21 @@ configure_portage() {
     # Now, append build-specific flags if needed
     sudo tee -a squashfs/etc/portage/make.conf > /dev/null << EOF
 
-# --- Build-Specific Overrides ---
+# --- Dynamic Resource Management ---
 # Generated: $(date)
+# System: $(free -h | grep Mem | awk '{print $2}') RAM, $(nproc) cores
+
+# Conservative build settings to prevent OOM
 MAKEOPTS="-j${JOBS} -l${LOAD}"
-EMERGE_DEFAULT_OPTS="--jobs=${JOBS} --load-average=${LOAD}"
+EMERGE_DEFAULT_OPTS="--jobs=${JOBS} --load-average=${LOAD} --keep-going"
+
+# Memory management
+PORTAGE_NICENESS="19"
+PORTAGE_IONICE_COMMAND="ionice -c 3 -p \${PID}"
+
+# Prevent memory exhaustion
+PORTAGE_TMPDIR="/var/tmp"
+PORTAGE_MEMORY_LIMIT="80%"
 EOF
     
     echo -e "${GREEN}✓ Portage configured with RaptorOS base config + build overrides${NC}"
@@ -463,6 +557,9 @@ force_cleanup_chroot() {
     sudo umount -lf "$build_dir/squashfs/proc" 2>/dev/null || true
     
     echo -e "${GREEN}✓ Chroot cleanup complete${NC}"
+    
+    # Cleanup swap file
+    cleanup_swap
 }
 
 # Safe chroot execution with automatic cleanup
@@ -1438,7 +1535,9 @@ main() {
     
     show_banner
     check_requirements
+    detect_build_resources  # Add resource detection
     detect_hardware
+    ensure_swap  # Add swap management
     select_stage3
     show_build_menu
     
