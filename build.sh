@@ -4,6 +4,11 @@ export LC_ALL=C
 export LANG=C
 export LANGUAGE=C
 
+# Preserve desktop session environment
+export DISPLAY="${DISPLAY:-:0}"
+export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+
 # Force git sync instead of rsync for better reliability
 export PORTAGE_SYNC_STALE=0
 export PORTAGE_SYNC_EXTRA_OPTS="--git"
@@ -13,7 +18,7 @@ export SYNC="git"
 # Optimized for Intel i9-14900K + RTX 4090
 # Build a custom Gentoo ISO with gaming optimizations
 
-set -e
+# set -e  # Commented out to prevent unexpected exits that can affect desktop session
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,6 +84,14 @@ show_banner() {
 # Check requirements
 check_requirements() {
     log_info "Checking build requirements..."
+    
+    # Check if running in terminal (prevents desktop session issues)
+    if [ ! -t 0 ]; then
+        echo -e "${RED}ERROR: This script must be run in a terminal!${NC}"
+        echo -e "${YELLOW}Please run: gnome-terminal, konsole, or xterm${NC}"
+        echo -e "${YELLOW}Then run: sudo ./build.sh${NC}"
+        exit 1
+    fi
     
     # Use enhanced validation if available
     if command -v validate_system_requirements &> /dev/null; then
@@ -466,7 +479,7 @@ safe_chroot_exec() {
     local temp_script=$(mktemp)
     cat > "$temp_script" << 'SCRIPT_END'
 #!/bin/bash
-set -e
+# set -e  # Commented out to prevent unexpected exits
 source /etc/profile
 
 # Add timeout to prevent hanging
@@ -539,7 +552,8 @@ cleanup_on_signal() {
     force_cleanup_chroot
     
     echo -e "${GREEN}Cleanup complete. Your system should be stable.${NC}"
-    exit 130  # Standard exit code for Ctrl+C
+    echo -e "${YELLOW}Returning to build menu...${NC}"
+    return 0  # Return instead of exit to prevent session termination
 }
 
 # Cleanup chroot (enhanced version)
@@ -1432,13 +1446,9 @@ main() {
     log_success "Build process completed in: $end_time"
 }
 
-# Enhanced signal handling and cleanup
+# Enhanced signal handling and cleanup (single handlers to prevent conflicts)
 trap cleanup_on_signal INT TERM
 trap force_cleanup_chroot EXIT
-
-# Register signal handlers for safe interruption
-trap 'echo -e "${YELLOW}Received interrupt signal, cleaning up...${NC}"; cleanup_on_signal' INT
-trap 'echo -e "${YELLOW}Received termination signal, cleaning up...${NC}"; cleanup_on_signal' TERM
 
 # Run if not sourced
 if [ "${BASH_SOURCE[0]}" == "${0}" ]; then
