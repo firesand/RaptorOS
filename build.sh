@@ -688,8 +688,28 @@ EMERGE_DEFAULT_OPTS="${EMERGE_DEFAULT_OPTS} --getbinpkg"
 PORTAGE_BINHOST="https://gentoo.osuosl.org/experimental/amd64/binpkg/default/linux/17.1/x86-64/"
 EOF
     
-    # Install packages in chroot
-    sudo chroot squashfs /bin/bash << 'CHROOTCMD'
+    # Install packages in chroot with strict memory limits
+    echo -e "${CYAN}Starting chroot with memory limits...${NC}"
+    
+    # Calculate memory limit (reserve 4GB for system)
+    local total_ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    local reserved_kb=$((4 * 1024 * 1024))  # 4GB reserved
+    local build_limit_kb=$((total_ram_kb - reserved_kb))
+    local build_limit_gb=$((build_limit_kb / 1024 / 1024))
+    
+    echo -e "Total RAM: $((total_ram_kb / 1024 / 1024))GB"
+    echo -e "Reserved for system: 4GB"
+    echo -e "Available for build: ${build_limit_gb}GB"
+    
+    # Run chroot with strict memory limits
+    sudo systemd-run --uid=0 --gid=0 \
+        --property=MemoryMax=${build_limit_kb}K \
+        --property=MemorySwapMax=0 \
+        --property=CPUQuota=75% \
+        --property=IOWeight=100 \
+        --slice=gentoo-build.slice \
+        --pipe \
+        chroot squashfs /bin/bash << 'CHROOTCMD'
 #!/bin/bash
 source /etc/profile
 
