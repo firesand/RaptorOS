@@ -1,8 +1,8 @@
 #!/bin/bash
-# Fix locale issues
-export LC_ALL=C
-export LANG=C
-export LANGUAGE=C
+# Preserve desktop locale (don't override with C locale)
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export LANG="${LANG:-en_US.UTF-8}"
+export LANGUAGE="${LANGUAGE:-en_US.UTF-8}"
 
 # Preserve desktop session environment
 export DISPLAY="${DISPLAY:-:0}"
@@ -27,46 +27,36 @@ ISO_OUTPUT="raptoros-gaming-$(date +%Y%m%d)-${STAGE3_TYPE:-desktop-openrc}.iso"
 STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/"
 STAGE3_PATTERN="stage3-amd64-desktop-openrc"
 
-# Auto-detect reasonable values based on system resources
+# Auto-detect reasonable values based on system resources (SAFER VERSION)
 detect_build_resources() {
     local cpu_cores=$(nproc)
     local total_ram=$(free -g | awk '/^Mem:/{print $2}')
     
-    # Calculate safe job count (lesser of CPU cores or RAM/2GB)
-    local max_jobs_by_ram=$((total_ram / 2))  # 2GB per job
-    local max_jobs_by_cpu=$((cpu_cores))
+    # Reserve 8GB for system (safer for desktop)
+    local system_reserve=8
+    local available_ram=$((total_ram - system_reserve))
     
-    # Use the smaller value for safety
-    if [ $max_jobs_by_ram -lt $max_jobs_by_cpu ]; then
-        JOBS=$max_jobs_by_ram
-    else
-        JOBS=$max_jobs_by_cpu
-    fi
-    
-    # Never exceed 75% of CPU cores
-    local safe_jobs=$((cpu_cores * 3 / 4))
-    if [ $JOBS -gt $safe_jobs ]; then
-        JOBS=$safe_jobs
-    fi
-    
-    # Minimum 2, maximum 16 for safety
-    if [ $JOBS -lt 2 ]; then
+    if [ $available_ram -lt 4 ]; then
+        echo -e "${RED}WARNING: Not enough RAM for safe build!${NC}"
+        echo -e "${RED}Total: ${total_ram}GB, Need to reserve: ${system_reserve}GB${NC}"
+        echo -e "${YELLOW}Build will use minimal resources for safety${NC}"
         JOBS=2
-    elif [ $JOBS -gt 16 ]; then
-        JOBS=16
-    fi
-    
-    # Load average should be CPU cores minus 2 (leave headroom)
-    LOAD=$((cpu_cores - 2))
-    if [ $LOAD -lt 2 ]; then
         LOAD=2
+    else
+        # Safe calculation - 2GB per job, but cap at 8 for safety
+        JOBS=$((available_ram / 2))  # 2GB per job
+        if [ $JOBS -gt 8 ]; then
+            JOBS=8  # Cap at 8 for maximum safety
+        fi
+        LOAD=$((JOBS))
     fi
     
-    echo -e "${CYAN}Build resources calculated:${NC}"
-    echo -e "  CPU cores: $cpu_cores"
+    echo -e "${CYAN}Safe build configuration:${NC}"
     echo -e "  Total RAM: ${total_ram}GB"
-    echo -e "  Safe JOBS: $JOBS"
-    echo -e "  Safe LOAD: $LOAD"
+    echo -e "  Reserved for system: ${system_reserve}GB"
+    echo -e "  Available for build: ${available_ram}GB"
+    echo -e "  Build JOBS: $JOBS (capped at 8 for safety)"
+    echo -e "  Build LOAD: $LOAD"
     echo ""
 }
 
@@ -524,12 +514,17 @@ force_cleanup_chroot() {
     
     cd / # Change to root to avoid being in mounted directory
     
-    # Kill processes using the mounts
-    echo "Terminating processes using mounts..."
-    sudo fuser -km "$build_dir/squashfs/dev" 2>/dev/null || true
-    sudo fuser -km "$build_dir/squashfs/proc" 2>/dev/null || true
-    sudo fuser -km "$build_dir/squashfs/sys" 2>/dev/null || true
-    sudo fuser -km "$build_dir/squashfs/run" 2>/dev/null || true
+    # SAFELY kill only chroot processes, not desktop processes
+    echo "Safely terminating chroot processes..."
+    
+    # Kill only processes that are actually in the chroot
+    for pid in $(lsof 2>/dev/null | grep "$build_dir/squashfs" | awk '{print $2}' | sort -u); do
+        # Check if this is actually a chroot process
+        if readlink /proc/$pid/root 2>/dev/null | grep -q "$build_dir/squashfs"; then
+            echo "Killing chroot process: $pid"
+            kill -TERM $pid 2>/dev/null || true
+        fi
+    done
     
     # Wait a moment for processes to die
     sleep 2
@@ -691,25 +686,24 @@ EOF
     # Install packages in chroot with strict memory limits
     echo -e "${CYAN}Starting chroot with memory limits...${NC}"
     
-    # Calculate memory limit (reserve 4GB for system)
+    # Calculate memory limit (reserve 8GB for system - safer for desktop)
     local total_ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    local reserved_kb=$((4 * 1024 * 1024))  # 4GB reserved
+    local reserved_kb=$((8 * 1024 * 1024))  # 8GB reserved for system safety
     local build_limit_kb=$((total_ram_kb - reserved_kb))
     local build_limit_gb=$((build_limit_kb / 1024 / 1024))
     
     echo -e "Total RAM: $((total_ram_kb / 1024 / 1024))GB"
-    echo -e "Reserved for system: 4GB"
+    echo -e "Reserved for system: 8GB (safer for desktop)"
     echo -e "Available for build: ${build_limit_gb}GB"
     
-    # Run chroot with strict memory limits
-    sudo systemd-run --uid=0 --gid=0 \
-        --property=MemoryMax=${build_limit_kb}K \
-        --property=MemorySwapMax=0 \
-        --property=CPUQuota=75% \
-        --property=IOWeight=100 \
-        --slice=gentoo-build.slice \
-        --pipe \
-        chroot squashfs /bin/bash << 'CHROOTCMD'
+    # Run chroot with safe priority settings (DON'T use systemd-run - it can affect desktop!)
+    echo -e "${CYAN}Starting chroot with safe priority settings...${NC}"
+    
+    # Setup chroot
+    setup_chroot
+    
+    # Use nice and ionice instead of systemd-run for safety
+    nice -n 19 ionice -c 3 sudo chroot squashfs /bin/bash << 'CHROOTCMD'
 #!/bin/bash
 source /etc/profile
 
