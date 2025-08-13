@@ -1,4 +1,9 @@
 #!/bin/bash
+# Fix locale issues
+export LC_ALL=C
+export LANG=C
+export LANGUAGE=C
+
 # Gentoo Gaming ISO Builder
 # Optimized for Intel i9-14900K + RTX 4090
 # Build a custom Gentoo ISO with gaming optimizations
@@ -540,12 +545,12 @@ create_iso() {
     log_info "Creating compressed filesystem..."
     sudo mksquashfs squashfs iso/gentoo.squashfs \
         -comp xz -b 1M -Xdict-size 100% \
-        -exclude boot/lost+found \
-        -exclude var/tmp/portage \
-        -exclude var/cache/distfiles \
-        -exclude var/cache/gentoo \
-        -exclude tmp \
-        -exclude root/.cache
+        -e boot/lost+found \
+        -e var/tmp/portage \
+        -e var/cache/distfiles \
+        -e var/cache/gentoo \
+        -e tmp \
+        -e root/.cache
     
     # Setup bootloader
     safe_mkdir "iso/boot" "boot directory"
