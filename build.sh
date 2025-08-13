@@ -4,6 +4,11 @@ export LC_ALL=C
 export LANG=C
 export LANGUAGE=C
 
+# Force git sync instead of rsync for better reliability
+export PORTAGE_SYNC_STALE=0
+export PORTAGE_SYNC_EXTRA_OPTS="--git"
+export SYNC="git"
+
 # Gentoo Gaming ISO Builder
 # Optimized for Intel i9-14900K + RTX 4090
 # Build a custom Gentoo ISO with gaming optimizations
