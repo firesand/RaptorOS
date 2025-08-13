@@ -405,14 +405,158 @@ setup_chroot() {
     sudo cp -L /etc/resolv.conf squashfs/etc/
 }
 
-# Cleanup chroot
+# Enhanced cleanup function with force unmount
+force_cleanup_chroot() {
+    echo -e "${CYAN}Force cleaning up chroot mounts...${NC}"
+    
+    local build_dir="${BUILD_DIR:-/var/tmp/gentoo-gaming-build}"
+    
+    if [ ! -d "$build_dir/squashfs" ]; then
+        return
+    fi
+    
+    cd / # Change to root to avoid being in mounted directory
+    
+    # Kill processes using the mounts
+    echo "Terminating processes using mounts..."
+    sudo fuser -km "$build_dir/squashfs/dev" 2>/dev/null || true
+    sudo fuser -km "$build_dir/squashfs/proc" 2>/dev/null || true
+    sudo fuser -km "$build_dir/squashfs/sys" 2>/dev/null || true
+    sudo fuser -km "$build_dir/squashfs/run" 2>/dev/null || true
+    
+    # Wait a moment for processes to die
+    sleep 2
+    
+    # Unmount in correct order (most specific first)
+    echo "Unmounting filesystems..."
+    
+    # Find all submounts and unmount them first
+    for mount in $(findmnt -R "$build_dir/squashfs" -o TARGET --noheadings | tac 2>/dev/null); do
+        sudo umount -l "$mount" 2>/dev/null || true
+    done
+    
+    # Force unmount the main ones
+    sudo umount -R "$build_dir/squashfs/run" 2>/dev/null || true
+    sudo umount -R "$build_dir/squashfs/dev" 2>/dev/null || true
+    sudo umount -R "$build_dir/squashfs/sys" 2>/dev/null || true
+    sudo umount -R "$build_dir/squashfs/proc" 2>/dev/null || true
+    
+    # Last resort - lazy unmount
+    sudo umount -lf "$build_dir/squashfs/run" 2>/dev/null || true
+    sudo umount -lf "$build_dir/squashfs/dev/pts" 2>/dev/null || true
+    sudo umount -lf "$build_dir/squashfs/dev/shm" 2>/dev/null || true
+    sudo umount -lf "$build_dir/squashfs/dev" 2>/dev/null || true
+    sudo umount -lf "$build_dir/squashfs/sys" 2>/dev/null || true
+    sudo umount -lf "$build_dir/squashfs/proc" 2>/dev/null || true
+    
+    echo -e "${GREEN}✓ Chroot cleanup complete${NC}"
+}
+
+# Safe chroot execution with automatic cleanup
+safe_chroot_exec() {
+    local chroot_script="$1"
+    local chroot_dir="${BUILD_DIR}/squashfs"
+    
+    echo -e "${CYAN}Entering safe chroot environment...${NC}"
+    
+    # Setup chroot
+    setup_chroot
+    
+    # Create a temporary script
+    local temp_script=$(mktemp)
+    cat > "$temp_script" << 'SCRIPT_END'
+#!/bin/bash
+set -e
+source /etc/profile
+
+# Add timeout to prevent hanging
+timeout_handler() {
+    echo "Command timed out!"
+    exit 1
+}
+trap timeout_handler TERM
+
+SCRIPT_END
+    
+    # Add the actual commands
+    echo "$chroot_script" >> "$temp_script"
+    
+    # Copy script to chroot
+    sudo cp "$temp_script" "$chroot_dir/tmp/chroot_script.sh"
+    sudo chmod +x "$chroot_dir/tmp/chroot_script.sh"
+    rm "$temp_script"
+    
+    # Execute with timeout and cleanup
+    (
+        # Run in subshell to capture PID
+        sudo timeout --preserve-status 3600 \
+            chroot "$chroot_dir" /tmp/chroot_script.sh
+    ) &
+    
+    CHROOT_PID=$!
+    
+    # Wait for completion or interruption
+    wait $CHROOT_PID 2>/dev/null || {
+        local exit_code=$?
+        if [ $exit_code -eq 130 ] || [ $exit_code -eq 143 ]; then
+            echo -e "${YELLOW}Chroot interrupted by user${NC}"
+        elif [ $exit_code -eq 124 ]; then
+            echo -e "${RED}Chroot timed out after 1 hour${NC}"
+        else
+            echo -e "${RED}Chroot failed with exit code: $exit_code${NC}"
+        fi
+    }
+    
+    # Always cleanup
+    cleanup_chroot
+    
+    # Remove temporary script
+    sudo rm -f "$chroot_dir/tmp/chroot_script.sh"
+    
+    unset CHROOT_PID
+}
+
+# Enhanced signal handling and cleanup
+cleanup_on_signal() {
+    echo ""
+    echo -e "${RED}Build interrupted! Cleaning up...${NC}"
+    
+    # Set a flag to prevent recursive cleanup
+    if [ "${CLEANUP_IN_PROGRESS}" = "true" ]; then
+        return
+    fi
+    export CLEANUP_IN_PROGRESS=true
+    
+    # Kill any running chroot processes
+    if [ -n "${CHROOT_PID}" ]; then
+        echo "Killing chroot processes..."
+        sudo kill -TERM ${CHROOT_PID} 2>/dev/null || true
+        sleep 2
+        sudo kill -KILL ${CHROOT_PID} 2>/dev/null || true
+    fi
+    
+    # Force cleanup of mounts
+    force_cleanup_chroot
+    
+    echo -e "${GREEN}Cleanup complete. Your system should be stable.${NC}"
+    exit 130  # Standard exit code for Ctrl+C
+}
+
+# Cleanup chroot (enhanced version)
 cleanup_chroot() {
     echo -e "${CYAN}Cleaning up chroot...${NC}"
     
+    # Try normal cleanup first
     sudo umount -l squashfs/proc 2>/dev/null || true
     sudo umount -l squashfs/sys 2>/dev/null || true
     sudo umount -l squashfs/dev 2>/dev/null || true
     sudo umount -l squashfs/run 2>/dev/null || true
+    
+    # If mounts still exist, force cleanup
+    if mount | grep -q "squashfs"; then
+        echo "Some mounts still exist, forcing cleanup..."
+        force_cleanup_chroot
+    fi
 }
 
 # Quick build using binaries
@@ -1288,13 +1432,13 @@ main() {
     log_success "Build process completed in: $end_time"
 }
 
-# Trap to ensure cleanup on exit
-trap cleanup_chroot EXIT
+# Enhanced signal handling and cleanup
+trap cleanup_on_signal INT TERM
+trap force_cleanup_chroot EXIT
 
-# Enhanced cleanup trap if available
-if command -v cleanup_on_exit &> /dev/null; then
-    trap cleanup_on_exit EXIT
-fi
+# Register signal handlers for safe interruption
+trap 'echo -e "${YELLOW}Received interrupt signal, cleaning up...${NC}"; cleanup_on_signal' INT
+trap 'echo -e "${YELLOW}Received termination signal, cleaning up...${NC}"; cleanup_on_signal' TERM
 
 # Run if not sourced
 if [ "${BASH_SOURCE[0]}" == "${0}" ]; then
