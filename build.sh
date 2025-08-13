@@ -24,8 +24,36 @@ PURPLE='\033[0;35m'
 NC='\033[0m'
 
 # Source modules
-source "$SCRIPT_DIR/lib/colors.sh" 2>/dev/null || true
-source "$SCRIPT_DIR/lib/functions.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/lib/colors.sh" 2>/dev/null || {
+    echo "Warning: colors.sh not found, using fallback colors"
+    # Fallback color definitions
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    PURPLE='\033[0;35m'
+    NC='\033[0m'
+}
+
+source "$SCRIPT_DIR/lib/functions.sh" 2>/dev/null || {
+    echo "Warning: functions.sh not found, using fallback functions"
+    # Fallback function definitions
+    log_info() { echo "[INFO] $1"; }
+    log_success() { echo -e "${GREEN}[SUCCESS] $1${NC}"; }
+    log_warning() { echo -e "${YELLOW}[WARNING] $1${NC}"; }
+    log_error() { echo -e "${RED}[ERROR] $1${NC}"; }
+    die() { echo -e "${RED}FATAL ERROR: $1${NC}"; exit 1; }
+}
+
+# Source additional modules
+source "$SCRIPT_DIR/lib/iso_boot.sh" 2>/dev/null || {
+    echo "Warning: iso_boot.sh not found, ISO boot support limited"
+}
+
+source "$SCRIPT_DIR/lib/build_validation.sh" 2>/dev/null || {
+    echo "Warning: build_validation.sh not found, build validation disabled"
+}
 
 # Banner
 show_banner() {
@@ -40,6 +68,15 @@ show_banner() {
 
 # Check requirements
 check_requirements() {
+    log_info "Checking build requirements..."
+    
+    # Use enhanced validation if available
+    if command -v validate_system_requirements &> /dev/null; then
+        validate_system_requirements
+        return
+    fi
+    
+    # Fallback to basic validation
     echo -e "${CYAN}Checking build requirements...${NC}"
     
     local required_tools="wget git mksquashfs xorriso parted mkfs.fat btrfs dialog"
@@ -147,8 +184,9 @@ show_build_menu() {
     echo "4) ISO Only - Use existing build directory"
     echo "5) Clean Build Directory"
     echo "6) Recovery Mode - Fix broken installation"
+    echo "7) Validate Build - Run comprehensive validation checks"
     echo ""
-    read -p "Select [1-6]: " BUILD_TYPE
+    read -p "Select [1-7]: " BUILD_TYPE
     
     case $BUILD_TYPE in
         1) build_quick ;;
@@ -157,6 +195,7 @@ show_build_menu() {
         4) create_iso_only ;;
         5) clean_build ;;
         6) recovery_mode ;;
+        7) validate_existing_build ;;
         *) echo -e "${RED}Invalid option${NC}"; exit 1 ;;
     esac
 }
@@ -493,36 +532,58 @@ EOF
 
 # Create ISO
 create_iso() {
-    echo -e "${CYAN}Creating ISO image...${NC}"
+    log_info "Creating ISO image..."
     
     cd "$BUILD_DIR"
     
     # Create squashfs
-    echo -e "${CYAN}Creating compressed filesystem...${NC}"
+    log_info "Creating compressed filesystem..."
     sudo mksquashfs squashfs iso/gentoo.squashfs \
         -comp xz -b 1M -Xdict-size 100% \
         -exclude boot/lost+found \
         -exclude var/tmp/portage \
-        -exclude var/cache/distfiles
+        -exclude var/cache/distfiles \
+        -exclude var/cache/gentoo \
+        -exclude tmp \
+        -exclude root/.cache
     
     # Setup bootloader
-    mkdir -p iso/{boot,EFI/BOOT}
+    safe_mkdir "iso/boot" "boot directory"
+    safe_mkdir "iso/EFI/BOOT" "EFI boot directory"
     
     # Copy kernel
-    sudo cp squashfs/boot/vmlinuz* iso/boot/vmlinuz 2>/dev/null || \
-        sudo cp squashfs/boot/kernel* iso/boot/vmlinuz 2>/dev/null
+    local kernel_found=false
+    for kernel_pattern in "vmlinuz*" "kernel*" "bzImage*"; do
+        if ls squashfs/boot/$kernel_pattern 2>/dev/null | grep -q .; then
+            sudo cp squashfs/boot/$kernel_pattern iso/boot/vmlinuz
+            kernel_found=true
+            log_success "Kernel copied: $(ls squashfs/boot/$kernel_pattern | head -1)"
+            break
+        fi
+    done
     
-    # Create basic initramfs if needed
-    if [ ! -f squashfs/boot/initramfs* ]; then
-        echo -e "${YELLOW}Creating minimal initramfs...${NC}"
-        # This is simplified - real initramfs would need more setup
-        (cd squashfs && sudo find . | sudo cpio -o -H newc | gzip > ../iso/boot/initramfs)
-    else
-        sudo cp squashfs/boot/initramfs* iso/boot/initramfs
+    if [ "$kernel_found" = false ]; then
+        die "No kernel found in squashfs/boot/"
     fi
     
-    # Create GRUB config
-    cat > iso/boot/grub.cfg << 'GRUBCFG'
+    # Use enhanced ISO boot support if available
+    if command -v setup_complete_boot_support &> /dev/null; then
+        log_info "Using enhanced ISO boot support..."
+        setup_complete_boot_support "squashfs" "iso" "/boot/vmlinuz"
+    else
+        log_warning "Enhanced ISO boot support not available, using basic setup..."
+        
+        # Create basic initramfs if needed
+        if [ ! -f squashfs/boot/initramfs* ]; then
+            log_warning "Creating minimal initramfs..."
+            # This is simplified - real initramfs would need more setup
+            (cd squashfs && sudo find . | sudo cpio -o -H newc | gzip > ../iso/boot/initramfs)
+        else
+            sudo cp squashfs/boot/initramfs* iso/boot/initramfs
+        fi
+        
+        # Create basic GRUB config
+        cat > iso/boot/grub/grub.cfg << 'GRUBCFG'
 set timeout=10
 set default=0
 
@@ -536,21 +597,31 @@ menuentry "Gentoo Gaming Live (Safe Mode)" {
     initrd /boot/initramfs
 }
 GRUBCFG
+    fi
     
     # Create ISO
-    echo -e "${CYAN}Building ISO image...${NC}"
+    log_info "Building ISO image..."
     xorriso -as mkisofs \
         -o "$SCRIPT_DIR/$ISO_OUTPUT" \
-        -V "GENTOO_GAMING" \
+        -V "RAPTOROS_GAMING" \
         -J -R -l \
         -b boot/grub/stage2_eltorito \
         -no-emul-boot \
         -boot-load-size 4 \
         -boot-info-table \
+        -isohybrid-mbr /usr/lib/syslinux/bios/mbr.bin 2>/dev/null || true \
         iso/
     
-    echo -e "${GREEN}✓ ISO created: $ISO_OUTPUT${NC}"
-    echo -e "${GREEN}  Size: $(du -h "$SCRIPT_DIR/$ISO_OUTPUT" | cut -f1)${NC}"
+    log_success "ISO created: $ISO_OUTPUT"
+    log_info "Size: $(du -h "$SCRIPT_DIR/$ISO_OUTPUT" | cut -f1)"
+    
+    # Run validation if available
+    if command -v run_complete_validation &> /dev/null; then
+        log_info "Running build validation..."
+        run_complete_validation "squashfs" "iso" "$SCRIPT_DIR/$ISO_OUTPUT"
+    else
+        log_warning "Build validation not available"
+    fi
 }
 
 # Create ISO only (using existing build)
@@ -565,16 +636,64 @@ create_iso_only() {
 
 # Clean build directory
 clean_build() {
-    echo -e "${YELLOW}Cleaning build directory...${NC}"
+    log_info "Cleaning build directory..."
     
     cleanup_chroot
     
     read -p "This will delete all build files. Continue? [y/N]: " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
         sudo rm -rf "$BUILD_DIR"
-        echo -e "${GREEN}Build directory cleaned${NC}"
+        log_success "Build directory cleaned"
     else
-        echo -e "${YELLOW}Cancelled${NC}"
+        log_warning "Clean cancelled"
+    fi
+}
+
+# Validate existing build
+validate_existing_build() {
+    log_info "Validating existing build..."
+    
+    if [ ! -d "$BUILD_DIR/squashfs" ]; then
+        die "No build directory found. Run a build first."
+    fi
+    
+    if [ ! -d "$BUILD_DIR/iso" ]; then
+        die "No ISO directory found. Run a build first."
+    fi
+    
+    # Check if ISO file exists
+    local iso_file=""
+    for file in "$SCRIPT_DIR"/raptoros-gaming-*.iso; do
+        if [ -f "$file" ]; then
+            iso_file="$file"
+            break
+        fi
+    done
+    
+    if [ -z "$iso_file" ]; then
+        die "No ISO file found. Run a build first."
+    fi
+    
+    log_info "Found build components:"
+    log_info "  SquashFS: $BUILD_DIR/squashfs"
+    log_info "  ISO directory: $BUILD_DIR/iso"
+    log_info "  ISO file: $iso_file"
+    
+    # Run validation if available
+    if command -v run_complete_validation &> /dev/null; then
+        log_info "Running comprehensive build validation..."
+        run_complete_validation "$BUILD_DIR/squashfs" "$BUILD_DIR/iso" "$iso_file"
+    else
+        log_warning "Build validation not available, running basic checks..."
+        
+        # Basic validation
+        echo "=== Basic Build Validation ==="
+        echo "SquashFS size: $(du -sh "$BUILD_DIR/squashfs" | cut -f1)"
+        echo "ISO directory size: $(du -sh "$BUILD_DIR/iso" | cut -f1)"
+        echo "ISO file size: $(du -h "$iso_file" | cut -f1)"
+        echo "Kernel: $(ls "$BUILD_DIR/squashfs/boot"/vmlinuz* 2>/dev/null | head -1 || echo 'Not found')"
+        echo "Initramfs: $(ls "$BUILD_DIR/squashfs/boot"/initramfs* 2>/dev/null | head -1 || echo 'Not found')"
+        echo "GRUB config: $(ls "$BUILD_DIR/iso/boot/grub"/grub.cfg 2>/dev/null | head -1 || echo 'Not found')"
     fi
 }
 
@@ -1077,15 +1196,25 @@ unmount_chroot_filesystems() {
 
 # Main execution
 main() {
+    local start_time=$(start_timer)
+    
     show_banner
     check_requirements
     detect_hardware
     select_stage3
     show_build_menu
+    
+    local end_time=$(end_timer "$start_time")
+    log_success "Build process completed in: $end_time"
 }
 
 # Trap to ensure cleanup on exit
 trap cleanup_chroot EXIT
+
+# Enhanced cleanup trap if available
+if command -v cleanup_on_exit &> /dev/null; then
+    trap cleanup_on_exit EXIT
+fi
 
 # Run if not sourced
 if [ "${BASH_SOURCE[0]}" == "${0}" ]; then
