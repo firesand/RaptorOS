@@ -9,7 +9,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="/var/tmp/gentoo-gaming-build"
 ISO_OUTPUT="raptoros-gaming-$(date +%Y%m%d)-${STAGE3_TYPE:-desktop-openrc}.iso"
-STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-desktop-openrc/"
+STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/"
+STAGE3_PATTERN="stage3-amd64-desktop-openrc"
 JOBS=48
 LOAD=48
 
@@ -105,28 +106,33 @@ select_stage3() {
     case $STAGE3_CHOICE in
         1) 
             STAGE3_TYPE="desktop-openrc"
-            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-desktop-openrc/"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/"
+            STAGE3_PATTERN="stage3-amd64-desktop-openrc"
             echo -e "${GREEN}Selected: Desktop OpenRC Stage3 (Recommended)${NC}"
             ;;
         2) 
             STAGE3_TYPE="desktop-systemd"
-            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-desktop-systemd/"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/"
+            STAGE3_PATTERN="stage3-amd64-desktop-systemd"
             echo -e "${GREEN}Selected: Desktop Systemd Stage3${NC}"
             ;;
         3) 
             STAGE3_TYPE="minimal-openrc"
-            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-openrc/"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/"
+            STAGE3_PATTERN="stage3-amd64-openrc"
             echo -e "${GREEN}Selected: Minimal OpenRC Stage3${NC}"
             ;;
         4) 
             STAGE3_TYPE="minimal-systemd"
-            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-systemd/"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/"
+            STAGE3_PATTERN="stage3-amd64-systemd"
             echo -e "${GREEN}Selected: Minimal Systemd Stage3${NC}"
             ;;
         *) 
             echo -e "${RED}Invalid option, defaulting to Desktop OpenRC${NC}"
             STAGE3_TYPE="desktop-openrc"
-            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-desktop-openrc/"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/"
+            STAGE3_PATTERN="stage3-amd64-desktop-openrc"
             ;;
     esac
     echo ""
@@ -169,17 +175,31 @@ setup_build_env() {
     if [ ! -f "stage3-*.tar.xz" ]; then
         echo -e "${CYAN}Downloading stage3...${NC}"
         
-        # Get the latest stage3 file from the selected URL
-        local stage3_file=$(wget -qO- "$STAGE3_URL" | grep -o "stage3-[^\"<>]*\.tar\.xz" | grep -v "\.asc\|\.CONTENTS\|\.DIGESTS\|\.sha256" | head -1)
+        # Get the latest stage3 file from the selected URL using pattern matching
+        echo -e "${CYAN}Finding latest stage3 for pattern: $STAGE3_PATTERN${NC}"
         
-        if [ -z "$stage3_file" ]; then
-            echo -e "${RED}Error: Could not determine latest stage3 version${NC}"
+        # Find the latest date directory containing our stage3 pattern
+        local latest_date_dir=$(wget -qO- "$STAGE3_URL" | grep -o "href=\"[0-9]*T[0-9]*Z/\"" | grep -o "[0-9]*T[0-9]*Z" | sort -r | head -1)
+        
+        if [ -z "$latest_date_dir" ]; then
+            echo -e "${RED}Error: Could not find latest date directory${NC}"
             echo -e "${YELLOW}URL: $STAGE3_URL${NC}"
             exit 1
         fi
         
+        echo -e "${BLUE}Latest date directory: $latest_date_dir${NC}"
+        
+        # Now find the stage3 file in that directory
+        local stage3_file=$(wget -qO- "$STAGE3_URL$latest_date_dir/" | grep -o "stage3-[^\"<>]*\.tar\.xz" | grep "$STAGE3_PATTERN" | grep -v "\.asc\|\.CONTENTS\|\.DIGESTS\|\.sha256" | head -1)
+        
+        if [ -z "$stage3_file" ]; then
+            echo -e "${RED}Error: Could not find stage3 file for pattern: $STAGE3_PATTERN${NC}"
+            echo -e "${YELLOW}Date directory: $latest_date_dir${NC}"
+            exit 1
+        fi
+        
         echo -e "${YELLOW}Downloading: $stage3_file${NC}"
-        if ! wget -c "$STAGE3_URL$stage3_file"; then
+        if ! wget -c "$STAGE3_URL$latest_date_dir/$stage3_file"; then
             echo -e "${RED}Error: Failed to download stage3 tarball${NC}"
             exit 1
         fi
