@@ -329,6 +329,68 @@ EOF
     echo -e "${GREEN}✓ Portage configured with RaptorOS base config + build overrides${NC}"
 }
 
+# Configure repository sync method
+configure_repos() {
+    echo -e "${CYAN}Configuring repository sync method...${NC}"
+    
+    # Create repos.conf directory
+    sudo mkdir -p squashfs/etc/portage/repos.conf
+    
+    # Copy repos.conf if it exists
+    if [ -f "$SCRIPT_DIR/configs/repos.conf" ]; then
+        sudo cp "$SCRIPT_DIR/configs/repos.conf" squashfs/etc/portage/repos.conf/gentoo.conf
+        echo -e "${GREEN}✓ Git sync configured${NC}"
+    else
+        # Create repos.conf for git sync
+        sudo tee squashfs/etc/portage/repos.conf/gentoo.conf > /dev/null << 'EOF'
+[DEFAULT]
+main-repo = gentoo
+
+[gentoo]
+location = /var/db/repos/gentoo
+sync-type = git
+sync-uri = https://github.com/gentoo/gentoo.git
+auto-sync = yes
+sync-depth = 1
+clone-depth = 1
+EOF
+        echo -e "${GREEN}✓ Git sync configured (generated)${NC}"
+    fi
+}
+
+# Safe portage sync function
+safe_portage_sync() {
+    echo -e "${CYAN}Syncing portage tree...${NC}"
+    
+    # Try git first
+    if command -v git &> /dev/null && [ -f /etc/portage/repos.conf/gentoo.conf ]; then
+        if grep -q "sync-type = git" /etc/portage/repos.conf/gentoo.conf 2>/dev/null; then
+            echo "Using git sync..."
+            emerge --sync && return 0
+        fi
+    fi
+    
+    # Fallback to webrsync
+    echo "Using webrsync (more reliable than rsync)..."
+    emerge-webrsync && return 0
+    
+    # Last resort: try different rsync mirrors
+    echo "Trying alternative rsync mirrors..."
+    local mirrors=(
+        "rsync://rsync.gentoo.org/gentoo-portage"
+        "rsync://rsync.us.gentoo.org/gentoo-portage"
+        "rsync://rsync.eu.gentoo.org/gentoo-portage"
+    )
+    
+    for mirror in "${mirrors[@]}"; do
+        echo "Trying mirror: $mirror"
+        PORTAGE_RSYNC_EXTRA_OPTS="--timeout=30" SYNC="$mirror" emerge --sync && return 0
+    done
+    
+    echo -e "${RED}ERROR: Could not sync portage tree${NC}"
+    return 1
+}
+
 # Setup chroot
 setup_chroot() {
     echo -e "${CYAN}Setting up chroot environment...${NC}"
@@ -359,6 +421,7 @@ build_quick() {
     
     setup_build_env
     configure_portage
+    configure_repos  # Add this line
     setup_chroot
     
     # Add binary host
@@ -375,8 +438,16 @@ EOF
 #!/bin/bash
 source /etc/profile
 
-# Sync portage using git (more reliable than rsync)
-emerge --sync --quiet
+# First, check if git is available
+if ! command -v git &> /dev/null; then
+    echo "Installing git first..."
+    # Use webrsync as fallback to get initial portage tree
+    emerge-webrsync
+    emerge --oneshot dev-vcs/git
+fi
+
+# Now sync with git
+emerge --sync
 
 # Install essential packages
 emerge --quiet --getbinpkg -av \
@@ -428,6 +499,7 @@ build_optimized() {
     
     setup_build_env
     configure_portage
+    configure_repos  # Add this line
     setup_chroot
     
     # Build critical packages from source
@@ -477,6 +549,7 @@ build_full() {
     
     setup_build_env
     configure_portage
+    configure_repos  # Add this line
     setup_chroot
     
     # Build everything from source
