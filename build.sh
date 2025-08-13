@@ -370,8 +370,7 @@ EOF
 #!/bin/bash
 source /etc/profile
 
-# Sync portage
-emerge-webrsync
+# Sync portage using git (more reliable than rsync)
 emerge --sync --quiet
 
 # Install essential packages
@@ -431,8 +430,7 @@ build_optimized() {
 #!/bin/bash
 source /etc/profile
 
-# Sync portage
-emerge-webrsync
+# Sync portage using git (more reliable than rsync)
 emerge --sync --quiet
 
 # Update system
@@ -481,8 +479,7 @@ build_full() {
 #!/bin/bash
 source /etc/profile
 
-# Sync portage
-emerge-webrsync
+# Sync portage using git (more reliable than rsync)
 emerge --sync
 
 # Full system update
