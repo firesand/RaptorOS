@@ -403,7 +403,7 @@ configure_portage() {
     sudo cp -r "$SCRIPT_DIR/configs/package.env/"* "squashfs/etc/portage/package.env/" 2>/dev/null || true
     sudo cp -r "$SCRIPT_DIR/configs/package.accept_keywords/"* "squashfs/etc/portage/package.accept_keywords/" 2>/dev/null || true
     
-    # Now, append build-specific flags if needed
+    # Now, append build-specific flags with FIXES
     sudo tee -a squashfs/etc/portage/make.conf > /dev/null << EOF
 
 # --- Dynamic Resource Management ---
@@ -414,14 +414,21 @@ configure_portage() {
 MAKEOPTS="-j${JOBS} -l${LOAD}"
 EMERGE_DEFAULT_OPTS="--jobs=${JOBS} --load-average=${LOAD} --keep-going"
 
-# Memory management
+# Memory management (FIXED ionice command)
 PORTAGE_NICENESS="19"
-PORTAGE_IONICE_COMMAND="ionice -c 3 -p \${PID}"
+PORTAGE_IONICE_COMMAND="ionice -c 3"
+
+# Python targets (stable versions only)
+PYTHON_TARGETS="python3_11 python3_12"
+PYTHON_SINGLE_TARGET="python3_12"
 
 # Prevent memory exhaustion
 PORTAGE_TMPDIR="/var/tmp"
-PORTAGE_MEMORY_LIMIT="80%"
 EOF
+    
+    # Setup locale in chroot
+    echo "en_US.UTF-8 UTF-8" | sudo tee squashfs/etc/locale.gen > /dev/null
+    echo "LANG=\"en_US.UTF-8\"" | sudo tee squashfs/etc/locale.conf > /dev/null
     
     echo -e "${GREEN}✓ Portage configured with RaptorOS base config + build overrides${NC}"
 }
@@ -782,10 +789,17 @@ build_optimized() {
     configure_repos  # Now fixed
     setup_chroot
     
-    # Build critical packages from source WITH SAFE SETTINGS
+    # Build critical packages from source WITH FIXES
     sudo chroot squashfs /bin/bash << 'CHROOTCMD'
 #!/bin/bash
 source /etc/profile
+export LANG="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"
+
+# Generate locale if needed
+if [ -f /etc/locale.gen ]; then
+    locale-gen
+fi
 
 # First ensure git is installed for sync
 if ! command -v git &> /dev/null; then
@@ -798,13 +812,17 @@ fi
 echo "Syncing portage tree..."
 emerge --sync || emerge-webrsync  # Fallback to webrsync if git fails
 
+# Update Python packages first to fix dependency issues
+echo "Fixing Python dependencies..."
+emerge --oneshot --update dev-python/trove-classifiers dev-python/setuptools
+
 # Update system with safe settings
 echo "Updating base system..."
 emerge --update --deep --newuse @world --keep-going
 
-# Build kernel from source with SAFE job count
+# Build kernel from source with SAFE job count (without --ask)
 echo "Building kernel..."
-emerge -av sys-kernel/gentoo-sources
+emerge sys-kernel/gentoo-sources
 
 if [ -d /usr/src/linux ]; then
     cd /usr/src/linux
@@ -815,22 +833,22 @@ if [ -d /usr/src/linux ]; then
     make install
 fi
 
-# Install essential packages
+# Install essential packages (without --ask)
 echo "Installing essential packages..."
-emerge -av --keep-going \
+emerge --keep-going \
     sys-kernel/linux-firmware \
     sys-boot/grub \
     sys-boot/efibootmgr \
     sys-apps/systemd
 
-# Try to get NVIDIA drivers (might need to be from binary)
+# Try to get NVIDIA drivers (without --ask)
 echo "Installing GPU drivers..."
-emerge -av x11-drivers/nvidia-drivers || \
-    emerge --getbinpkg -av x11-drivers/nvidia-drivers
+emerge x11-drivers/nvidia-drivers || \
+    emerge --getbinpkg x11-drivers/nvidia-drivers
 
-# Gaming packages (use binaries where possible for speed)
+# Gaming packages (without --ask, use binaries where possible for speed)
 echo "Installing gaming packages..."
-emerge --getbinpkg -av --keep-going \
+emerge --getbinpkg --keep-going \
     games-util/steam-launcher \
     games-util/lutris \
     games-util/gamemode \
@@ -858,10 +876,17 @@ build_full() {
     configure_repos  # Now fixed
     setup_chroot
     
-    # Build everything from source WITH SAFE SETTINGS
+    # Build everything from source WITH FIXES
     sudo chroot squashfs /bin/bash << 'CHROOTCMD'
 #!/bin/bash
 source /etc/profile
+export LANG="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"
+
+# Generate locale if needed
+if [ -f /etc/locale.gen ]; then
+    locale-gen
+fi
 
 # First ensure git is installed for sync
 if ! command -v git &> /dev/null; then
@@ -874,13 +899,17 @@ fi
 echo "Syncing portage tree..."
 emerge --sync || emerge-webrsync  # Fallback to webrsync if git fails
 
+# Update Python packages first to fix dependency issues
+echo "Fixing Python dependencies..."
+emerge --oneshot --update dev-python/trove-classifiers dev-python/setuptools
+
 # Full system update with safe settings
 echo "Updating base system..."
 emerge --emptytree --update --deep --newuse @world --keep-going
 
-# Install all packages with safe settings
+# Install all packages with safe settings (without --ask)
 echo "Installing packages..."
-emerge -av --keep-going \
+emerge --keep-going \
     sys-kernel/gentoo-sources \
     sys-kernel/linux-firmware \
     sys-boot/grub \
