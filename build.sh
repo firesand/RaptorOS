@@ -8,8 +8,8 @@ set -e
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="/var/tmp/gentoo-gaming-build"
-ISO_OUTPUT="gentoo-gaming-$(date +%Y%m%d).iso"
-STAGE3_URL="https://distfiles.gentoo.org/releases/amd64/autobuilds/latest-stage3-amd64-openrc.txt"
+ISO_OUTPUT="raptoros-gaming-$(date +%Y%m%d)-${STAGE3_TYPE:-desktop-openrc}.iso"
+STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-desktop-openrc/"
 JOBS=48
 LOAD=48
 
@@ -30,8 +30,9 @@ source "$SCRIPT_DIR/lib/functions.sh" 2>/dev/null || true
 show_banner() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║           Gentoo Gaming ISO Builder v1.0                  ║${NC}"
+    echo -e "${CYAN}║                RaptorOS Gaming ISO Builder v1.0           ║${NC}"
     echo -e "${CYAN}║         Optimized for i9-14900K + RTX 4090               ║${NC}"
+    echo -e "${CYAN}║         Based on Gentoo Handbook:AMD64                   ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -40,7 +41,7 @@ show_banner() {
 check_requirements() {
     echo -e "${CYAN}Checking build requirements...${NC}"
     
-    local required_tools="wget git squashfs-tools xorriso parted dosfstools btrfs-progs dialog"
+    local required_tools="wget git mksquashfs xorriso parted mkfs.fat btrfs dialog"
     local missing_tools=""
     
     for tool in $required_tools; do
@@ -86,6 +87,51 @@ detect_hardware() {
     echo ""
 }
 
+# Stage3 selection
+select_stage3() {
+    echo -e "${CYAN}Select Stage3 type:${NC}"
+    echo "1) Desktop OpenRC (Recommended for gaming - includes desktop tools)"
+    echo "2) Desktop Systemd (Modern init system with desktop tools)"
+    echo "3) Minimal OpenRC (Basic system - requires more setup)"
+    echo "4) Minimal Systemd (Basic system with systemd)"
+    echo ""
+    echo -e "${YELLOW}Note: Desktop profiles include pre-configured desktop tools${NC}"
+    echo -e "${YELLOW}and are recommended for gaming systems (Handbook:AMD64)${NC}"
+    echo -e "${BLUE}Desktop profiles include: X11, sound, networking, and basic tools${NC}"
+    echo -e "${BLUE}Minimal profiles require manual setup of all desktop components${NC}"
+    echo ""
+    read -p "Select [1-4]: " STAGE3_CHOICE
+    
+    case $STAGE3_CHOICE in
+        1) 
+            STAGE3_TYPE="desktop-openrc"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-desktop-openrc/"
+            echo -e "${GREEN}Selected: Desktop OpenRC Stage3 (Recommended)${NC}"
+            ;;
+        2) 
+            STAGE3_TYPE="desktop-systemd"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-desktop-systemd/"
+            echo -e "${GREEN}Selected: Desktop Systemd Stage3${NC}"
+            ;;
+        3) 
+            STAGE3_TYPE="minimal-openrc"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-openrc/"
+            echo -e "${GREEN}Selected: Minimal OpenRC Stage3${NC}"
+            ;;
+        4) 
+            STAGE3_TYPE="minimal-systemd"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-systemd/"
+            echo -e "${GREEN}Selected: Minimal Systemd Stage3${NC}"
+            ;;
+        *) 
+            echo -e "${RED}Invalid option, defaulting to Desktop OpenRC${NC}"
+            STAGE3_TYPE="desktop-openrc"
+            STAGE3_URL="https://gentoo.osuosl.org/releases/amd64/autobuilds/current-stage3-amd64-desktop-openrc/"
+            ;;
+    esac
+    echo ""
+}
+
 # Build menu
 show_build_menu() {
     echo -e "${CYAN}Select build type:${NC}"
@@ -96,7 +142,7 @@ show_build_menu() {
     echo "5) Clean Build Directory"
     echo "6) Recovery Mode - Fix broken installation"
     echo ""
-    read -p "Select [1-5]: " BUILD_TYPE
+    read -p "Select [1-6]: " BUILD_TYPE
     
     case $BUILD_TYPE in
         1) build_quick ;;
@@ -112,6 +158,8 @@ show_build_menu() {
 # Setup build environment
 setup_build_env() {
     echo -e "${CYAN}Setting up build environment...${NC}"
+    echo -e "${BLUE}Following Gentoo Handbook:AMD64 installation process${NC}"
+    echo ""
     
     # Create directories
     mkdir -p "$BUILD_DIR"/{squashfs,iso,work}
@@ -120,18 +168,23 @@ setup_build_env() {
     # Download stage3 if needed
     if [ ! -f "stage3-*.tar.xz" ]; then
         echo -e "${CYAN}Downloading stage3...${NC}"
-        LATEST=$(wget -qO- $STAGE3_URL | tail -1 | cut -d' ' -f1)
         
-        if [ -z "$LATEST" ]; then
+        # Get the latest stage3 file from the selected URL
+        local stage3_file=$(wget -qO- "$STAGE3_URL" | grep -o "stage3-.*\.tar\.xz" | grep -v "\.asc\|\.CONTENTS\|\.DIGESTS\|\.sha256" | head -1)
+        
+        if [ -z "$stage3_file" ]; then
             echo -e "${RED}Error: Could not determine latest stage3 version${NC}"
+            echo -e "${YELLOW}URL: $STAGE3_URL${NC}"
             exit 1
         fi
         
-        echo -e "${YELLOW}Downloading: $LATEST${NC}"
-        if ! wget -c "https://distfiles.gentoo.org/releases/amd64/autobuilds/$LATEST"; then
+        echo -e "${YELLOW}Downloading: $stage3_file${NC}"
+        if ! wget -c "$STAGE3_URL$stage3_file"; then
             echo -e "${RED}Error: Failed to download stage3 tarball${NC}"
             exit 1
         fi
+        
+        echo -e "${GREEN}✓ Stage3 downloaded successfully${NC}"
     fi
     
     # Extract stage3
@@ -154,6 +207,15 @@ setup_build_env() {
         fi
         cd ..
         echo -e "${GREEN}✓ Stage3 extracted successfully${NC}"
+        
+        # Show profile information
+        if [[ "$STAGE3_TYPE" == *"desktop"* ]]; then
+            echo -e "${GREEN}✓ Desktop profile detected - includes X11, sound, and networking${NC}"
+            echo -e "${BLUE}This will significantly speed up the gaming setup process${NC}"
+        else
+            echo -e "${YELLOW}⚠ Minimal profile detected - additional setup required for desktop${NC}"
+            echo -e "${BLUE}Consider using desktop profiles for faster gaming setup${NC}"
+        fi
     fi
     
     # Copy configurations
@@ -998,6 +1060,7 @@ main() {
     show_banner
     check_requirements
     detect_hardware
+    select_stage3
     show_build_menu
 }
 
